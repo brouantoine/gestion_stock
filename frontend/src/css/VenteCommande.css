@@ -1,0 +1,91 @@
+.vente-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.vente-title {
+  color: #2c3e50;
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.form-section {
+  background-color: white;
+  padding: 20px;
+  margin-bottom: 20px;
+  border-radius: 5px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.section-title {
+  color: #3498db;
+  margin-top: 0;
+  margin-bottom: 15px;
+  font-size: 1.1em;
+}
+
+.tva-selector {
+  margin-bottom: 15px;
+}
+
+.tva-selector label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 500;
+}
+
+.form-control {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 16px;
+}
+
+/* Ajoutez d'autres styles au besoin */
+
+
+
+
+
+.stats-cards .stat-card small {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.8em;
+  color: #666;
+}
+
+.transactions-list table td:nth-child(4) {
+  text-align: right;
+  font-weight: bold;
+}
+
+
+/* Animation pour les transitions */
+.MuiPaper-root {
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.MuiPaper-root:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+/* Style personnalisé pour les boutons */
+.MuiButton-contained {
+  text-transform: none;
+  font-weight: 500;
+}
+
+/* Style pour les tables */
+.MuiTable-root {
+  min-width: 650px;
+}
+
+/* Style pour les inputs */
+.MuiOutlinedInput-root {
+  border-radius: 8px;
+}
