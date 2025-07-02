@@ -20,7 +20,6 @@ class Utilisateur(AbstractUser):
     telephone = models.CharField(max_length=20, blank=True, null=True)
     date_creation = models.DateTimeField(auto_now_add=True)
     est_actif = models.BooleanField(default=True)
-    modules = models.ManyToManyField('Module',blank=True)
     def __str__(self):
         return f"{self.get_full_name()} ({self.role})"
 
@@ -35,7 +34,7 @@ class Client(models.Model):
     siret = models.CharField(max_length=14, blank=True, null=True)
     date_creation = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True, null=True)
-
+    is_direct = models.BooleanField(default=False) 
     def __str__(self):
         return self.nom_client
 
@@ -359,43 +358,3 @@ class LigneCommandeClient(models.Model):
             return 0
 
 from django.db import models
-
-class Module(models.Model):
-    """
-    Système modulaire pour gérer les accès fonctionnels
-    """
-    CODE_CHOICES = [
-        ('PRODUCTS', 'Produits'),
-        ('SALES', 'Ventes'),
-        ('CAISSE', 'Caisse'),
-        ('CUSTOMERS', 'Clients'),
-        ('ORDERS', 'Commandes'),
-        ('ADMIN', 'Administration'),
-        ('REPORTS', 'Statistiques'),
-        ('INVENTORY', 'Inventaire'),
-        ('SETTINGS', 'Paramètres'),
-        ('LOGS', 'Logs')
-    ]
-
-    code = models.CharField(
-        max_length=20,
-        choices=CODE_CHOICES,
-        unique=True
-    )
-    name = models.CharField(max_length=100)
-    icon = models.CharField(max_length=50, blank=True)
-    route = models.CharField(max_length=100, default='/')
-    allowed_roles = models.CharField(max_length=200, default='admin')
-    order = models.PositiveIntegerField(default=0)
-
-    class Meta:
-        ordering = ['order']
-        verbose_name = "Module"
-        verbose_name_plural = "Modules"
-
-    def __str__(self):
-        return f"{self.name} ({self.code})"
-
-    @property
-    def roles_list(self):
-        return [r.strip() for r in self.allowed_roles.split(',')]

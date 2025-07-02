@@ -209,18 +209,16 @@ class LigneCommandeClientSerializer(serializers.ModelSerializer):
         }
 
 class CommandeClientSerializer(serializers.ModelSerializer):
-    lignes = LigneCommandeClientSerializer(many=True)
-    
     class Meta:
         model = CommandeClient
         fields = '__all__'
-        read_only_fields = ('total_commande',)  # Le total sera calculé côté serveur
+        extra_kwargs = {
+            'client': {'required': False}  # Rend le client optionnel
+        }
 
-    def create(self, validated_data):
-        lignes_data = validated_data.pop('lignes', [])
-        
-        # Création basique de la commande sans les lignes
-        commande = CommandeClient.objects.create(**validated_data)
-        
-        # Les lignes seront ajoutées dans la vue
-        return commande
+    def validate(self, data):
+        if not data.get('is_vente_directe') and not data.get('client'):
+            raise serializers.ValidationError(
+                "Un client est requis pour les commandes"
+            )
+        return data

@@ -151,22 +151,20 @@ class ClientViewSet(viewsets.ModelViewSet):
     queryset = Client.objects.all().order_by('-date_creation')
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     
-    filterset_fields = ['ville', 'pays']
+    filterset_fields = ['ville', 'pays', 'is_direct']  # Ajoutez 'is_direct' ici
     search_fields = ['nom_client', 'email', 'telephone', 'siret']
     ordering_fields = ['nom_client', 'date_creation']
     ordering = ['-date_creation']
 
     def perform_create(self, serializer):
-        """Ajoute des logs ou traitement supplémentaire à la création"""
         serializer.save()
-        # Exemple: logger.info(f"Nouveau client créé: {serializer.data['nom_client']}")
 
     def get_queryset(self):
-        """Optionnel: Filtrage supplémentaire"""
         queryset = super().get_queryset()
-        # Exemple de filtre supplémentaire:
-        # if self.request.query_params.get('actifs'):
-        #     queryset = queryset.filter(actif=True)
+        # Filtre supplémentaire pour is_direct
+        is_direct = self.request.query_params.get('is_direct')
+        if is_direct in ['true', 'false']:
+            queryset = queryset.filter(is_direct=is_direct.lower() == 'true')
         return queryset
         
 
@@ -302,39 +300,68 @@ def update_stock(sender, instance, **kwargs):
     produit.save()
 
 
-from rest_framework import viewsets, status
-from rest_framework.response import Response
-from .models import Vente, CommandeClient, LigneCommandeClient
-from .serializers import CommandeClientSerializer
 
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from .models import CommandeClient, LigneCommandeClient
 from .serializers import CommandeClientSerializer
 
+from django.db import transaction
+from rest_framework import viewsets, status
+from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
+
 class CommandeClientViewSet(viewsets.ModelViewSet):
     queryset = CommandeClient.objects.all()
     serializer_class = CommandeClientSerializer
 
-    def create(self, request):
-        data = request.data
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
         is_vente_directe = data.get('is_vente_directe', False)
         
+        # Configuration automatique pour les ventes directes
         if is_vente_directe:
             data.update({
                 'statut': 'VALIDEE',
                 'est_payee': True,
                 'mode_retrait': 'MAGASIN'
             })
-        
+
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         
-        # Création de la commande sans les lignes d'abord
+        # Phase 1: Vérification préalable
+        lignes_data = data.get('lignes', [])
+        produits_a_mettre_a_jour = []
+        
+        for line in lignes_data:
+            try:
+                produit = Produit.objects.select_for_update().get(id=line['produit'])
+                quantite = int(line['quantite'])
+                
+                if quantite <= 0:
+                    raise ValidationError(f"Quantité invalide pour le produit {produit.designation}")
+                
+                if is_vente_directe:
+                    nouveau_stock = produit.quantite_stock - quantite
+                    if nouveau_stock < 0:
+                        raise ValidationError(
+                            f"Stock insuffisant pour {produit.designation}. "
+                            f"Stock actuel: {produit.quantite_stock}, "
+                            f"Quantité demandée: {quantite}"
+                        )
+                    produits_a_mettre_a_jour.append((produit, quantite))
+                    
+            except Produit.DoesNotExist:
+                raise ValidationError(f"Produit ID {line['produit']} introuvable")
+            except KeyError as e:
+                raise ValidationError(f"Champ manquant dans la ligne: {str(e)}")
+
+        # Phase 2: Création de la commande
         commande = serializer.save()
         
-        # Création des lignes après que la commande a un ID
-        lignes_data = data.get('lignes', [])
+        # Création des lignes de commande
         for line in lignes_data:
             LigneCommandeClient.objects.create(
                 commande=commande,
@@ -343,22 +370,25 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
                 prix_unitaire=line['prix_unitaire'],
                 remise_ligne=line.get('remise_ligne', 0)
             )
-            
-        if is_vente_directe:
-            produit = Produit.objects.get(id=line['produit'])
-            produit.quantite_stock -= line['quantite']
-            produit.save(update_fields=['quantite_stock'])  # Sauvegarde optimisée
-        
-        # Optionnel : Ajouter une vérification de stock négatif
-        if produit.quantite_stock < 0:
-            raise ValidationError(f"Stock insuffisant pour {produit.designation}")
-        
-        # Force le calcul du total
-        commande.total_commande = commande.total_ttc
-        commande.save()
-        
-        return Response(self.get_serializer(commande).data, status=status.HTTP_201_CREATED)
 
+        # Phase 3: Mise à jour du stock
+        if is_vente_directe:
+            for produit, quantite in produits_a_mettre_a_jour:
+                produit.quantite_stock -= quantite
+                
+                # Vérification du seuil d'alerte
+                if produit.quantite_stock <= produit.seuil_alerte:
+                    # Ici vous pourriez déclencher une alerte
+                    pass
+                
+                produit.save(update_fields=['quantite_stock'])
+        
+        # Calcul du total
+        commande.refresh_from_db()
+        commande.total_commande = commande.total_ttc
+        commande.save(update_fields=['total_commande'])
+        
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 from django.db.models import Sum, Count, F, DecimalField
 from django.db.models.functions import TruncMonth
