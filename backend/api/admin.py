@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import Produit
 
 from .models import *
-admin.site.register([Utilisateur, Client, Fournisseur, Commande, LigneCommande, MouvementStock, Categorie,Taxe, Produit])
+admin.site.register([Utilisateur, Client, Fournisseur, Commande, LigneCommande, MouvementStock, Categorie,Taxe, Produit, Statistique])
 
 
 class ProduitAdmin(admin.ModelAdmin):

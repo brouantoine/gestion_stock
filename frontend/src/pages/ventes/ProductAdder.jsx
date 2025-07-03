@@ -2,15 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   Box, 
   TextField, 
-  Select, 
-  MenuItem, 
-  InputLabel, 
-  FormControl, 
   Button,
   CircularProgress,
-  Typography,
   Autocomplete,
-  InputAdornment
+  InputAdornment,
+  Chip
 } from '@mui/material';
 import { Add } from '@mui/icons-material';
 
@@ -41,6 +37,9 @@ const ProductAdder = ({
     fetchProducts();
   }, []);
 
+  // Filtrer les produits disponibles (quantité > 0)
+  const availableProducts = products.filter(product => product.quantite_stock > 0);
+
   return (
     <Box>
       {loading ? (
@@ -53,7 +52,29 @@ const ProductAdder = ({
             options={products}
             getOptionLabel={(option) => `${option.designation} - ${option.prix_vente} F`}
             value={selectedProduct}
-            onChange={(_, newValue) => setSelectedProduct(newValue)}
+            onChange={(_, newValue) => {
+              // Empêcher la sélection si quantité = 0
+              if (!newValue || newValue.quantite_stock > 0) {
+                setSelectedProduct(newValue);
+              }
+            }}
+            renderOption={(props, option) => (
+              <li {...props} 
+                  style={{
+                    ...props.style,
+                    opacity: option.quantite_stock > 0 ? 1 : 0.5,
+                    backgroundColor: option.quantite_stock > 0 ? 'inherit' : '#f5f5f5'
+                  }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                  <span>
+                    {option.designation} - {option.prix_vente} F
+                  </span>
+                  {option.quantite_stock <= 0 && (
+                    <Chip label="rupture" size="small" color="error" />
+                  )}
+                </Box>
+              </li>
+            )}
             renderInput={(params) => (
               <TextField 
                 {...params} 
@@ -63,6 +84,8 @@ const ProductAdder = ({
                 fullWidth
               />
             )}
+            isOptionEqualToValue={(option, value) => option.id === value.id}
+            getOptionDisabled={(option) => option.quantite_stock <= 0}
           />
 
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
@@ -74,8 +97,12 @@ const ProductAdder = ({
               variant="outlined"
               size="small"
               InputProps={{
-                inputProps: { min: 1 }
+                inputProps: { 
+                  min: 1,
+                  max: selectedProduct?.quantite_stock || undefined
+                }
               }}
+              helperText={selectedProduct && `Stock disponible: ${selectedProduct.quantite_stock}`}
               fullWidth
             />
 
@@ -98,7 +125,7 @@ const ProductAdder = ({
             variant="contained"
             startIcon={<Add />}
             onClick={onAdd}
-            disabled={!selectedProduct}
+            disabled={!selectedProduct || (selectedProduct && selectedProduct.quantite_stock <= 0)}
             fullWidth
             sx={{ mt: 1 }}
           >

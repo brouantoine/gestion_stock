@@ -174,16 +174,114 @@ class MouvementStock(models.Model):
     def __str__(self):
         return f"{self.type_mouvement} de {self.quantite} {self.produit.unite_mesure} pour {self.produit}"
 
+    from django.db import models
+from django.utils import timezone
+from django.db import transaction
+from django.db.models import Count, Sum, Q
+
 class Statistique(models.Model):
-    date = models.DateField(auto_now_add=True)
-    total_commandes = models.IntegerField(default=0)
-    total_clients = models.IntegerField(default=0)
-    total_fournisseurs = models.IntegerField(default=0)
-    total_produits = models.IntegerField(default=0)
-    ca_ht = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    """Modèle pour stocker les statistiques quotidiennes pré-calculées"""
+    date = models.DateField(unique=True)
+    
+    # Données brutes (non agrégées)
+    nb_commandes = models.IntegerField(default=0)  # Commandes fournisseurs
+    nb_ventes = models.IntegerField(default=0)     # Commandes clients
+    
+    # Détails des ventes
+    nb_ventes_directes = models.IntegerField(default=0)
+    nb_commandes_clients = models.IntegerField(default=0)
+    
+    # Chiffres d'affaires
+    montant_total = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    montant_ventes_directes = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    montant_commandes = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    
+    # Autres métriques
+    nouveaux_clients = models.IntegerField(default=0)
+    nouveaux_fournisseurs = models.IntegerField(default=0)
+    produits_actifs = models.IntegerField(default=0)
+    mouvements_stock = models.IntegerField(default=0)
+    produits_rupture = models.IntegerField(default=0)
+    produits_alerte = models.IntegerField(default=0)
+    utilisateurs_actifs = models.IntegerField(default=0)
+
+    class Meta:
+        verbose_name = "Statistique quotidienne"
+        verbose_name_plural = "Statistiques quotidiennes"
+        ordering = ['-date']
 
     def __str__(self):
-        return f"Statistiques du {self.date}"
+        return f"Stats du {self.date.strftime('%d/%m/%Y')}"
+
+    @classmethod
+    def update_daily_stats(cls):
+        """Met à jour les stats pour la journée actuelle"""
+        from api.models import Commande, CommandeClient, Client, Fournisseur, Produit, MouvementStock, Utilisateur
+        
+        today = timezone.now().date()
+        
+        with transaction.atomic():
+            stats, created = cls.objects.get_or_create(date=today)
+            
+            # Commandes fournisseurs
+            stats.nb_commandes = Commande.objects.filter(
+                date_creation__date=today
+            ).count()
+            
+            # Commandes clients
+            ventes_data = CommandeClient.objects.filter(
+                date_creation__date=today,
+                statut__in=['VALIDEE', 'LIVREE']
+            ).aggregate(
+                total=Count('id'),
+                ventes_directes=Count('id', filter=Q(client__isnull=True) | Q(client__id='3')),
+                montant_total=Sum('total_commande'),
+                montant_direct=Sum('total_commande', filter=Q(client__isnull=True) | Q(client__id='3'))
+            )
+            
+            stats.nb_ventes = ventes_data['total'] or 0
+            stats.nb_ventes_directes = ventes_data['ventes_directes'] or 0
+            stats.nb_commandes_clients = stats.nb_ventes - stats.nb_ventes_directes
+            stats.montant_total = ventes_data['montant_total'] or 0
+            stats.montant_ventes_directes = ventes_data['montant_direct'] or 0
+            stats.montant_commandes = stats.montant_total - stats.montant_ventes_directes
+            
+            # Autres métriques
+            stats.nouveaux_clients = Client.objects.filter(
+                date_creation__date=today
+            ).count()
+            
+            stats.nouveaux_fournisseurs = Fournisseur.objects.filter(
+                date_creation__date=today
+            ).count()
+            
+            stats.produits_actifs = Produit.objects.filter(
+                est_actif=True
+            ).count()
+            
+            stats.produits_rupture = Produit.objects.filter(
+                quantite_stock=0
+            ).count()
+            
+            stats.produits_alerte = Produit.objects.filter(
+                quantite_stock__gt=0,
+                quantite_stock__lte=models.F('seuil_alerte')
+            ).count()
+            
+            stats.mouvements_stock = MouvementStock.objects.filter(
+                date_mouvement__date=today
+            ).count()
+            
+            stats.utilisateurs_actifs = Utilisateur.objects.filter(
+                est_actif=True
+            ).count()
+            
+            stats.save()
+        
+        return stats
+
+    
+    
 from django.db import models
 from django.contrib.auth import get_user_model
 

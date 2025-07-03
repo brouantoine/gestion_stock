@@ -390,83 +390,74 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
         
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-from django.db.models import Sum, Count, F, DecimalField
-from django.db.models.functions import TruncMonth
+
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import CommandeClient, LigneCommandeClient, Utilisateur
+from django.utils import timezone
+from datetime import timedelta
+from .models import Statistique, CommandeClient
+from django.db.models import Sum, Avg
 
 @api_view(['GET'])
 def statistiques_commandes(request):
     try:
-        commandes = CommandeClient.objects.all()
+        # Paramètres de période (par défaut: 30 derniers jours)
+        days = int(request.GET.get('days', 30))
+        end_date = timezone.now().date()
+        start_date = end_date - timedelta(days=days)
         
-        if not commandes.exists():
-            return Response({
-                'success': True,
-                'message': 'Aucune commande trouvée',
-                'data': {}
-            })
-
-        # Calcul des statistiques
-        details = []
-        ventes_directes = 0
-        commandes_clients = 0
-        total_ca_ventes_directes = 0
-        total_ca_commandes = 0
-
-        for cmd in commandes:
-            is_vente_directe = cmd.client is None or cmd.client.nom_client == 'Client Direct'
-            total_cmd = float(cmd.total_commande) if cmd.total_commande else 0
-            
-            if is_vente_directe:
-                ventes_directes += 1
-                total_ca_ventes_directes += total_cmd
-            else:
-                commandes_clients += 1
-                total_ca_commandes += total_cmd
-
-            details.append({
-                'id': cmd.id,
-                'numero': cmd.numero_commande,
-                'date': cmd.date_creation.strftime('%Y-%m-%d %H:%M'),
-                'client': cmd.client.nom_client if cmd.client else 'Client Direct',
-                'is_vente_directe': is_vente_directe,
-                'total_ttc': total_cmd,
-                # ... autres champs
-            })
-
-        # Statistiques vendeurs
-        vendeurs_stats = {}
-        for cmd in commandes:
-            if cmd.utilisateur:
-                vendeur_id = cmd.utilisateur.id
-                if vendeur_id not in vendeurs_stats:
-                    vendeurs_stats[vendeur_id] = {
-                        'nom': cmd.utilisateur.get_full_name(),
-                        'nb_commandes': 0,
-                        'ca_total': 0
-                    }
-                vendeurs_stats[vendeur_id]['nb_commandes'] += 1
-                vendeurs_stats[vendeur_id]['ca_total'] += float(cmd.total_commande) if cmd.total_commande else 0
-
+        # Récupération des stats
+        stats_queryset = Statistique.objects.filter(
+            date__gte=start_date,
+            date__lte=end_date
+        ).order_by('date')
+        
+        # Calculs manuels des totaux
+        total_data = {
+            'total_ca': sum(s.montant_total for s in stats_queryset),
+            'total_ventes': sum(s.nb_ventes for s in stats_queryset),
+            'ventes_directes': sum(s.nb_ventes_directes for s in stats_queryset),
+            'commandes_clients': sum(s.nb_commandes_clients for s in stats_queryset),
+            'ca_ventes_directes': sum(s.montant_ventes_directes for s in stats_queryset),
+            'ca_commandes': sum(s.montant_commandes for s in stats_queryset),
+            'avg_ventes': sum(s.nb_ventes for s in stats_queryset) / days if days > 0 else 0
+        }
+        
+        # Détails quotidiens
+        daily_stats = [
+            {
+                'date': s.date.strftime('%Y-%m-%d'),
+                'ca_ht': float(s.montant_total),
+                'ventes': s.nb_ventes,
+                'ventes_directes': s.nb_ventes_directes,
+                'commandes_clients': s.nb_commandes_clients
+            } for s in stats_queryset
+        ]
+        
+        # Commandes récentes
+        recent_commands = CommandeClient.objects.filter(
+            date_creation__gte=start_date
+        ).order_by('-date_creation')[:10]
+        
         return Response({
             'success': True,
             'data': {
-                'stats': {
-                    'total_commandes': commandes.count(),
-                    'ventes_directes': ventes_directes,
-                    'commandes_clients': commandes_clients,
-                    'chiffre_affaires_total': total_ca_ventes_directes + total_ca_commandes,
-                    'chiffre_affaires_ventes_directes': total_ca_ventes_directes,
-                    'chiffre_affaires_commandes': total_ca_commandes,
-                    'periode': {
-                        'debut': commandes.earliest('date_creation').date_creation.strftime('%Y-%m-%d'),
-                        'fin': commandes.latest('date_creation').date_creation.strftime('%Y-%m-%d')
-                    }
+                'periode': {
+                    'debut': start_date.strftime('%Y-%m-%d'),
+                    'fin': end_date.strftime('%Y-%m-%d')
                 },
-                'details': details,
-                'vendeurs': list(vendeurs_stats.values())
+                'stats_globales': total_data,
+                'stats_quotidiennes': daily_stats,
+                'commandes_recentes': [
+                    {
+                        'id': cmd.id,
+                        'numero': cmd.numero_commande,
+                        'client': cmd.client.nom_client if cmd.client else 'Direct',
+                        'total': float(cmd.total_commande) if cmd.total_commande else 0,
+                        'date': cmd.date_creation.strftime('%Y-%m-%d %H:%M'),
+                        'is_vente_directe': cmd.client is None or cmd.client.id == '3'
+                    } for cmd in recent_commands
+                ]
             }
         })
 
@@ -477,7 +468,6 @@ def statistiques_commandes(request):
             'message': 'Erreur lors du calcul des statistiques'
         }, status=500)
     
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
