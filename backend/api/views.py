@@ -45,12 +45,6 @@ class IsVendeurOrCaissier(BasePermission):
 
 
 
-
-
-
-
-
-
 class ProduitViewSet(viewsets.ModelViewSet):
     queryset = Produit.objects.all()
     serializer_class = ProduitSerializer
@@ -551,8 +545,6 @@ class UpdateUserRoleView(APIView):
                 {"error": "Utilisateur introuvable"}, 
                 status=status.HTTP_404_NOT_FOUND
             )       
-
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -563,11 +555,75 @@ class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
         return Response({
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "is_superuser": user.is_superuser,
-            "role": user.role  # Si vous avez un champ personnalisé
+            "id": request.user.id,
+            "username": request.user.username,
+            "role": request.user.role
         })
+
+class UserModulesView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        ROLE_MODULES = {
+            'admin': ['VENTE', 'PRODUIT', 'COMMANDE', 'CLIENT', 'STATS', 'UTILISATEUR', 'CONFIGURATION'],
+            'gestionnaire': ['PRODUIT', 'COMMANDE', 'STATS'],
+            'vendeur': ['VENTE', 'CLIENT', 'STATS']
+        }
+        return Response({"modules": ROLE_MODULES.get(request.user.role, [])})
+    
+class ConfigurationView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+from rest_framework import viewsets, permissions, status
+from rest_framework.response import Response
+from django.contrib.auth.models import Group, Permission
+from .models import Utilisateur
+from .serializers import (
+    UserSerializer,
+    UserCreateSerializer,
+    GroupSerializer,
+    PermissionSerializer
+)
+from django.contrib.auth.hashers import make_password
+
+class UserViewSet(viewsets.ModelViewSet):
+    queryset = Utilisateur.objects.all()
+    permission_classes = [permissions.IsAdminUser]
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return UserCreateSerializer
+        return UserSerializer
+
+    def perform_create(self, serializer):
+        password = make_password(self.request.data.get('password'))
+        serializer.save(password=password)
+
+class GroupViewSet(viewsets.ModelViewSet):
+    queryset = Group.objects.all()
+    serializer_class = GroupSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Permission.objects.all()
+    serializer_class = PermissionSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+class PasswordResetView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+    
+    def post(self, request, user_id):
+        try:
+            user = Utilisateur.objects.get(id=user_id)
+            new_password = request.data.get('new_password')
+            user.set_password(new_password)
+            user.save()
+            return Response({"status": "password reset"})
+        except Utilisateur.DoesNotExist:
+            return Response(
+                {"error": "User not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )

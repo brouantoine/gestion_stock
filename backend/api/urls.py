@@ -4,12 +4,17 @@ from .views import (
     CurrentUserView,
     FournisseurViewSet, 
     ProduitViewSet, 
-    ClientViewSet, 
+    ClientViewSet,
+    UserModulesView, 
     UtilisateurViewSet,
     CommandeViewSet, 
     LigneCommandeViewSet,
     CommandeClientViewSet,
     UpdateUserRoleView,
+    UserViewSet,
+    GroupViewSet,
+    PermissionViewSet,
+    PasswordResetView,
     statistiques_commandes, 
     api_performance_vendeur,
     statistiques_commandes,  # Importez votre vue personnalisée
@@ -32,7 +37,9 @@ router.register(r'lignes-commande', LigneCommandeViewSet, basename='lignecommand
 router.register(r'fournisseurs', FournisseurViewSet)
 router.register(r'utilisateurs', UtilisateurViewSet, basename='utilisateur')
 router.register(r'clients', ClientViewSet, basename='client')
-
+router.register(r'users', UserViewSet, basename='user')
+router.register(r'groups', GroupViewSet, basename='group')
+router.register(r'permissions', PermissionViewSet, basename='permission')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -47,6 +54,9 @@ urlpatterns = [
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('token/verify/', TokenVerifyView.as_view(), name='token_verify'),
     path('statistiques/', statistiques_commandes, name='statistiques-commandes'),
+    path('user/', CurrentUserView.as_view(), name='current-user'),
+    path('user/modules/', UserModulesView.as_view(), name='user-modules'),
+    path('users/<int:user_id>/reset_password/', PasswordResetView.as_view(), name='reset-password'),
 ]
 
 # urlpatterns = [

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Menu, Dropdown, Avatar, Badge, Button } from 'antd';
+import { Layout, Menu, Dropdown, Avatar, Button } from 'antd';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   MenuFoldOutlined,
@@ -13,19 +13,37 @@ import {
   BarChartOutlined,
   ShoppingCartOutlined
 } from '@ant-design/icons';
-import { logout, getCurrentUser } from '../services/api/authService';
+import { useAuth } from '../context/AuthContext'; // Importez votre contexte d'authentification
 
 const { Header, Sider, Content } = Layout;
 
 const NavBar = ({ children }) => {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
-  const currentUser = getCurrentUser();
+  const { user, modules, logout } = useAuth(); // Utilisez les données d'authentification
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
+
+  // Configuration des éléments de menu avec leurs codes correspondants
+  const MENU_ITEMS = [
+    { key: '1', icon: <HomeOutlined />, label: 'Dashboard', path: '/', code: 'DASHBOARD' },
+    { key: '2', icon: <ShoppingOutlined />, label: 'Produits', path: '/produits', code: 'PRODUIT' },
+    { key: '3', icon: <ShoppingCartOutlined />, label: 'Commandes', path: '/commandes', code: 'COMMANDE' },
+    { key: '4', icon: <TeamOutlined />, label: 'Clients', path: '/clients', code: 'CLIENT' },
+    { key: '5', icon: <UserOutlined />, label: 'Utilisateurs', path: '/utilisateurs', code: 'UTILISATEUR' },
+    { key: '6', icon: <BarChartOutlined />, label: 'Statistiques', path: '/statistiques', code: 'STATS' }
+  ];
+
+  // Filtre les éléments du menu selon les modules autorisés
+  const filteredMenuItems = MENU_ITEMS.filter(item => {
+    // L'admin voit tout
+    if (user?.role === 'admin') return true;
+    // Pour les autres rôles, vérifie si le module est autorisé
+    return modules.includes(item.code);
+  });
 
   const userMenu = (
     <Menu>
@@ -67,24 +85,11 @@ const NavBar = ({ children }) => {
           defaultSelectedKeys={['1']}
           style={{ borderRight: 0 }}
         >
-          <Menu.Item key="1" icon={<HomeOutlined />}>
-            <Link to="/">Dashboard</Link>
-          </Menu.Item>
-          <Menu.Item key="2" icon={<ShoppingOutlined />}>
-            <Link to="/produits">Produits</Link>
-          </Menu.Item>
-          <Menu.Item key="3" icon={<ShoppingCartOutlined />}>
-            <Link to="/commandes">Commandes</Link>
-          </Menu.Item>
-          <Menu.Item key="4" icon={<TeamOutlined />}>
-            <Link to="/clients">Clients</Link>
-          </Menu.Item>
-          <Menu.Item key="5" icon={<UserOutlined />}>
-            <Link to="/utilisateurs">Utilisateurs</Link>
-          </Menu.Item>
-          <Menu.Item key="6" icon={<BarChartOutlined />}>
-            <Link to="/statistiques">Statistiques</Link>
-          </Menu.Item>
+          {filteredMenuItems.map(item => (
+            <Menu.Item key={item.key} icon={item.icon}>
+              <Link to={item.path}>{item.label}</Link>
+            </Menu.Item>
+          ))}
         </Menu>
       </Sider>
 
@@ -115,13 +120,13 @@ const NavBar = ({ children }) => {
               gap: 8
             }}>
               <Avatar 
-                src={currentUser?.avatar} 
+                src={user?.avatar} 
                 icon={<UserOutlined />}
                 style={{ backgroundColor: '#1890ff' }}
               />
               {!collapsed && (
                 <span style={{ fontWeight: 500 }}>
-                  {currentUser?.username || 'Utilisateur'}
+                  {user?.username || 'Utilisateur'} ({user?.role})
                 </span>
               )}
             </div>

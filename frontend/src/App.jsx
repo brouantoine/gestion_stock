@@ -14,6 +14,7 @@ import UtilisateurList from './pages/utilisateurs/utilisateurList';
 import UtilisateurPerformance from './pages/utilisateurs/UtilisateurPerformance';
 import StatistiquesBoite from './pages/statistiques/statistiques';
 import VenteCommande from './pages/ventes/VenteCommande';
+import Configuration from './config/Configuration';
 
 function App() {
   return (
@@ -40,6 +41,7 @@ function App() {
               <Route path="/utilisateurs/:userId/performance" element={<UtilisateurPerformance />} />
               <Route path="/statistiques" element={<StatistiquesBoite />} />
               <Route path="/ventecommande" element={<VenteCommande />} />
+              <Route path="/configuration" element={<Configuration />} />
             </Routes>
           </NavBar>
         } />

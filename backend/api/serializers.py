@@ -5,19 +5,6 @@ from .models import Produit, Taxe
 from django.core.validators import ValidationError
 
 
-
-
-from rest_framework import serializers
-from .models import Utilisateur
-
-class UtilisateurSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Utilisateur
-        fields = '__all__'  # Ou spécifiez les champs explicitement
-
-
-
-
 class ProduitSerializer(serializers.ModelSerializer):
     class Meta:
         model = Produit
@@ -222,3 +209,42 @@ class CommandeClientSerializer(serializers.ModelSerializer):
                 "Un client est requis pour les commandes"
             )
         return data
+    
+from rest_framework import serializers
+from django.contrib.auth.models import Group, Permission
+from .models import Utilisateur
+
+class PermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Permission
+        fields = ['id', 'name', 'codename']
+
+class GroupSerializer(serializers.ModelSerializer):
+    permissions = PermissionSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Group
+        fields = ['id', 'name', 'permissions']
+
+class UserSerializer(serializers.ModelSerializer):
+    groups = GroupSerializer(many=True, read_only=True)
+    custom_permissions = PermissionSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Utilisateur
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'role', 'telephone', 'is_active', 'groups', 
+            'custom_permissions', 'date_joined'
+        ]
+        extra_kwargs = {'password': {'write_only': True}}
+
+class UserCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Utilisateur
+        fields = [
+            'username', 'password', 'email', 
+            'first_name', 'last_name', 'role',
+            'telephone', 'is_active'
+        ]
+        extra_kwargs = {'password': {'write_only': True}}
