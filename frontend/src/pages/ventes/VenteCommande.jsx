@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { 
   Box, 
@@ -10,24 +10,96 @@ import {
   TextField,
   MenuItem,
   IconButton,
-  Tooltip,
   Alert,
   CircularProgress
 } from '@mui/material';
 import {
   Add,
-  Delete,
   Refresh,
   LocalMall,
   PointOfSale,
   Person,
   AttachMoney,
-  ShoppingCart
+  ShoppingCart,
+  QrCodeScanner
 } from '@mui/icons-material';
 import ClientSelector from './ClientSelector';
 import TypeSelector from './TypeSelector';
 import ProductAdder from './ProductAdder';
 import ProductList from './ProductList';
+import './scanner.css';
+
+const BarcodeScanner = ({ onDetected, onError }) => {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (!('BarcodeDetector' in window)) {
+      onError(new Error('Scanner non supporté par votre navigateur'));
+      return;
+    }
+
+    let stream;
+    const initScanner = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: "environment",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        });
+        
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+
+        const detector = new window.BarcodeDetector({ formats: ['ean_13'] });
+        
+        const detect = () => {
+          if (!videoRef.current) return;
+          
+          detector.detect(videoRef.current)
+            .then(([result]) => {
+              if (result) {
+                onDetected(result.rawValue);
+              }
+              requestAnimationFrame(detect);
+            })
+            .catch(err => onError(err));
+        };
+        
+        detect();
+      } catch (err) {
+        onError(err);
+      }
+    };
+
+    initScanner();
+    
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [onDetected, onError]);
+
+  return (
+    <video 
+      ref={videoRef}
+      autoPlay
+      playsInline
+      muted
+      style={{
+        width: '100%',
+        height: 'auto',
+        maxHeight: '300px',
+        borderRadius: '4px',
+        border: '2px solid #4CAF50'
+      }}
+    />
+  );
+};
 
 const VenteCommande = () => {
   const [typeTransaction, setTypeTransaction] = useState('VENTE_DIRECTE');
@@ -41,8 +113,27 @@ const VenteCommande = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [scanMode, setScanMode] = useState(false);
+  const [scanStatus, setScanStatus] = useState('');
 
-  // Charge le client direct au montage
+  const handleBarcodeScanned = useCallback((barcode) => {
+    setScanStatus(`Code scanné: ${barcode}`);
+    
+    axios.get(`/api/produits/?codebarre=${barcode}`)
+      .then(response => {
+        if (response.data.results?.length > 0) {
+          setSelectedProduct(response.data.results[0]);
+          setScanStatus(`Produit trouvé: ${response.data.results[0].nom}`);
+        } else {
+          setScanStatus('Produit non trouvé');
+        }
+      })
+      .catch(error => {
+        setScanStatus('Erreur recherche produit');
+        console.error(error);
+      });
+  }, []);
+
   useEffect(() => {
     const loadDirectClient = async () => {
       try {
@@ -229,6 +320,53 @@ const VenteCommande = () => {
                 setDiscount={setDiscount}
                 onAdd={handleAddProduct}
               />
+              
+              <Box sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
+                <Button
+                  variant={scanMode ? "contained" : "outlined"}
+                  color={scanMode ? "secondary" : "primary"}
+                  onClick={() => setScanMode(!scanMode)}
+                  startIcon={<QrCodeScanner />}
+                  sx={{ mr: 2 }}
+                >
+                  {scanMode ? 'Arrêter le scan' : 'Scanner code-barres'}
+                </Button>
+                
+                {scanStatus && (
+                  <Typography variant="caption" color="text.secondary">
+                    {scanStatus}
+                  </Typography>
+                )}
+              </Box>
+
+              {scanMode && (
+                <Box sx={{ 
+                  mt: 2,
+                  border: '2px dashed',
+                  borderColor: 'primary.main',
+                  borderRadius: 1,
+                  p: 1,
+                  minHeight: '300px',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center'
+                }}>
+                  {('BarcodeDetector' in window) ? (
+                    <BarcodeScanner 
+                      onDetected={handleBarcodeScanned}
+                      onError={(error) => {
+                        setScanStatus(`Erreur: ${error.message}`);
+                        setScanMode(false);
+                      }}
+                    />
+                  ) : (
+                    <Typography color="error" textAlign="center">
+                      Votre navigateur ne supporte pas le scan direct.<br />
+                      Essayez avec Chrome/Edge sur Android.
+                    </Typography>
+                  )}
+                </Box>
+              )}
             </Paper>
           </Grid>
 

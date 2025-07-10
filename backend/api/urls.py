@@ -15,6 +15,7 @@ from .views import (
     GroupViewSet,
     PermissionViewSet,
     PasswordResetView,
+    BarcodeConsumer,
     statistiques_commandes, 
     api_performance_vendeur,
     statistiques_commandes,  # Importez votre vue personnalisée
@@ -57,6 +58,7 @@ urlpatterns = [
     path('user/', CurrentUserView.as_view(), name='current-user'),
     path('user/modules/', UserModulesView.as_view(), name='user-modules'),
     path('users/<int:user_id>/reset_password/', PasswordResetView.as_view(), name='reset-password'),
+    path("ws/barcode/", BarcodeConsumer.as_asgi()),
 ]
 
 # urlpatterns = [

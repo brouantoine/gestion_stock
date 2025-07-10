@@ -627,3 +627,44 @@ class PasswordResetView(APIView):
                 {"error": "User not found"}, 
                 status=status.HTTP_404_NOT_FOUND
             )
+        
+from django.http import JsonResponse
+from channels.generic.websocket import AsyncWebsocketConsumer
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+import json
+
+# Partie WebSocket
+class BarcodeConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        await self.accept()
+        await self.channel_layer.group_add("barcode_group", self.channel_name)
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard("barcode_group", self.channel_name)
+
+    async def receive(self, text_data):
+        # Reçoit les scans du frontend (optionnel)
+        data = json.loads(text_data)
+        await self.channel_layer.group_send(
+            "barcode_group",
+            {"type": "broadcast_barcode", "data": data}
+        )
+
+    async def broadcast_barcode(self, event):
+        # Envoie les données à tous les clients connectés
+        await self.send(text_data=json.dumps(event["data"]))
+
+# Partie HTTP (votre vue existante)
+def scan_barcode(request):
+    if request.method == 'POST':
+        barcode = request.POST.get('barcode')
+        
+        # Envoi temps réel via WebSocket
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            "barcode_group",
+            {"type": "broadcast_barcode", "data": {"barcode": barcode}}
+        )
+        
+        return JsonResponse({"status": "success"})

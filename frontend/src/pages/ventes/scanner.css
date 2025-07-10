@@ -1,0 +1,31 @@
+.scanner-container {
+  position: relative;
+  width: 100%;
+  max-width: 500px;
+  margin: 15px auto;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.scanner-container video {
+  display: block;
+  background: #000;
+  width: 100%;
+  height: auto;
+}
+
+.scanner-status {
+  margin: 10px 0;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.scanner-error {
+  color: #f44336;
+  font-weight: bold;
+}
+
+.scanner-success {
+  color: #4CAF50;
+}

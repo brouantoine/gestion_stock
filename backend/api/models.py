@@ -94,7 +94,6 @@ class Produit(models.Model):
         ('l', 'Litre'),
         ('m', 'Mètre'),
     )
-    
     categorie = models.ForeignKey('Categorie', on_delete=models.SET_NULL, null=True)
     reference = models.CharField(max_length=50, unique=True, blank=True)
     designation = models.CharField(max_length=255)

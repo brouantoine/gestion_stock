@@ -207,10 +207,22 @@ AUTHENTICATION_BACKENDS = [
 # settings.py
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "http://192.168.1.102:3000",
+    "http://192.168.1.100:3000"
 ]
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'ROTATE_REFRESH_TOKENS': True,
+}
+
+# Channels
+ASGI_APPLICATION = "votre_projet.asgi.application"
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",  # Pour le dev
+        # "BACKEND": "channels_redis.core.RedisChannelLayer",  # Pour la prod
+        # "CONFIG": {"hosts": [("redis://localhost:6379")]},
+    },
 }
