@@ -110,16 +110,10 @@ class CommandeViewSet(viewsets.ModelViewSet):
              'en_attente': Commande.objects.filter(
                  statut='BROUILLON'
              ).count(),
-             'ca_ht': Commande.objects.filter(
-                 statut='VALIDEE'
-             ).aggregate(
-                 total=Sum('total_ht')
-             )['total'] or 0,
              'fournisseurs_actifs': Commande.objects.values(
                  'fournisseur'
              ).distinct().count(),
          }
-        
          return Response(stats)
 
 class LigneCommandeViewSet(viewsets.ModelViewSet):

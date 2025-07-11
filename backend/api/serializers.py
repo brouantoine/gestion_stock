@@ -54,34 +54,10 @@ from .models import Commande
 
 class CommandeSerializer(serializers.ModelSerializer):
     lignes = LigneCommandeSerializer(many=True, required=False, read_only=True)
-    total_ht = serializers.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        read_only=True,
-        coerce_to_string=False  # Important pour les décimaux
-    )
-    nom_fournisseur = serializers.CharField(
-        source='fournisseur.nom_fournisseur',
-        read_only=True,
-        allow_null=True  # Permet les valeurs nulles
-    )
 
     class Meta:
-        model = Commande
-        fields = [
-            'id',
-            'numero',
-            'date_creation',
-            'date_validation',
-            'statut',
-            'notes',
-            'remise_globale',
-            'fournisseur',
-            'nom_fournisseur',
-            'utilisateur',
-            'total_ht',
-            'lignes'
-        ]
+        model = Commande 
+        fields = '__all__'
         extra_kwargs = {
             'fournisseur': {'required': True},
             'utilisateur': {'read_only': True}

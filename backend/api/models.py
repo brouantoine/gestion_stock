@@ -1,8 +1,9 @@
 # models.py
+import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
-
+from datetime import datetime
 from api import permissions
 
 
@@ -132,25 +133,22 @@ class Commande(models.Model):
     STATUS_CHOICES = [
         ('BROUILLON', 'Brouillon'),
         ('VALIDEE', 'Validée'),
-        ('EN_PREPARATION', 'En préparation'),
         ('LIVREE', 'Livrée'),
-        ('ANNULEE', 'Annulée'),
-    ]
-    
-    numero = models.CharField(max_length=20, unique=True)
+        ('ANNULEE', 'Annulée'),]
+    code_commande = models.CharField(max_length=20,unique=True,editable=False,  )
     fournisseur = models.ForeignKey('Fournisseur', on_delete=models.PROTECT, related_name='commandes' )
+    type_produit = models.CharField(max_length=50,  blank=False, null=False)  # Type de produit commandé
+    prix_unitaires = models.DecimalField(max_digits=10, decimal_places=2, default=0, blank=True, null=True)
+    quantite = models.IntegerField(validators=[MinValueValidator(1)])
+    prix_total = models.DecimalField(max_digits=10, decimal_places=0, default=0, blank=True, null=True)
     date_creation = models.DateTimeField(auto_now_add=True)
     date_validation = models.DateTimeField(null=True, blank=True)
     statut = models.CharField(max_length=20, choices=STATUS_CHOICES, default='BROUILLON')
     utilisateur = models.ForeignKey(Utilisateur, on_delete=models.PROTECT)
     notes = models.TextField(blank=True)
-    remise_globale = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    # Ajouter dans les deux modèles
-    tva = models.ForeignKey(Taxe, on_delete=models.PROTECT)
-    date_echeance = models.DateField(blank=True, null=True)  # Pour paiement
     
     def __str__(self):
-        return f"Commande {self.numero} - {self.fournisseur}"
+        return f"Commande {self.type_produit} - {self.fournisseur}"
     
     @property
     def total_ht(self):
@@ -159,6 +157,17 @@ class Commande(models.Model):
     @property
     def total_ttc(self):
         return self.total_ht  # Ajouter taxes si nécessaire
+    def generate_code(self):
+        """Génère un code unique basé sur la date et un identifiant unique"""
+        date_part = self.date_creation.strftime('%Y%m%d') if self.date_creation else datetime.now().strftime('%Y%m%d')
+        unique_part = uuid.uuid4().hex[:6].upper()
+        return f"CMD-{date_part}-{unique_part}"
+
+    def save(self, *args, **kwargs):
+    # Génère un code seulement si vide ou None (pas si "")
+        if not self.code_commande:  # Cela capture None et "" 
+            self.code_commande = self.generate_code()
+        super().save(*args, **kwargs)
 
 class LigneCommande(models.Model):
     commande = models.ForeignKey(Commande, on_delete=models.CASCADE, related_name='lignes')
