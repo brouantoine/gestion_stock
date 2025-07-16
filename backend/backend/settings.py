@@ -41,8 +41,14 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'api',
-     'corsheaders',
+    'corsheaders',
+    'admin_interface',
+    'colorfield',
+    'crispy_forms',
+    'crispy_bootstrap5',
+    'debug_toolbar',
 ]
+CRISPY_TEMPLATE_PACK = 'bootstrap5'
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',

@@ -4,9 +4,6 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/auth/Login';
 import NavBar from './components/NavBar';
 import ProduitList from './pages/Produits/ProduitList';
-import CommandeList from './pages/commandes/CommandeList';
-import NouvelleCommande from './pages/commandes/NouvelleCommande';
-import DetailCommande from './pages/commandes/DetailCommande';
 import Dashboard from './pages/Dashboard/Dashboard';
 import ClientList from './pages/Clients/ClientList';
 import ClientDetail from './pages/Clients/ClientDetail';
@@ -32,9 +29,6 @@ function App() {
           <NavBar>
             <Routes>
               <Route path="/produits" element={<ProduitList />} />
-              <Route path="/commandes" element={<CommandeList />} />
-              <Route path="/commandes/nouveau" element={<NouvelleCommande />} />
-              <Route path="/commandes/:id" element={<DetailCommande />} />
               <Route path="/clients" element={<ClientList />} />
               <Route path="/clients/:id" element={<ClientDetail />} />
               <Route path="/utilisateurs" element={<UtilisateurList />} />

@@ -18,7 +18,6 @@ from django.db.models import Sum
 
 from api.admin import RoleChangeLog
 from .models import Commande, LigneCommande, MouvementStock
-from .serializers import CommandeSerializer, LigneCommandeSerializer
 from rest_framework import viewsets
 from .models import Fournisseur
 from .serializers import FournisseurSerializer
@@ -50,76 +49,22 @@ class ProduitViewSet(viewsets.ModelViewSet):
     serializer_class = ProduitSerializer
 
     def update(self, request, *args, **kwargs):
-        partial = kwargs.pop('partial', False)
         instance = self.get_object()
-        
-        # Ne pas permettre la modification de la référence
-        if 'reference' in request.data:
-            request.data.pop('reference')
-        
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-
-        return Response(serializer.data)
-    
-    
-class ProduitViewSet(viewsets.ModelViewSet):
-    queryset = Produit.objects.all()
-    serializer_class = ProduitSerializer
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        serializer = self.get_serializer(instance, data=request.data, partial=False)
         
         try:
-            self.perform_create(serializer)
-            headers = self.get_success_headers(serializer.data)
-            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            return Response(serializer.data)
         except Exception as e:
+            logger.error(f"Erreur modification produit: {str(e)}")
             return Response(
                 {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_400_BAD_REQUEST
             )
-            
-
-
-class CommandeViewSet(viewsets.ModelViewSet):
-     queryset = Commande.objects.prefetch_related('lignes', 'fournisseur').all() 
-     serializer_class = CommandeSerializer
-
-     @action(detail=True, methods=['post'])
-     def valider(self, request, pk=None):
-         commande = self.get_object()
-         commande.statut = 'VALIDEE'
-         commande.save()
-         return Response({'status': 'Commande validée'})
-     @action(detail=False, methods=['get'])
-     def stats(self, request):
-         aujourdhui = datetime.now()
-         debut_mois = aujourdhui.replace(day=1)
-        
-         stats = {
-             'mois_courant': Commande.objects.filter(
-                 date_creation__gte=debut_mois
-             ).count(),
-             'en_attente': Commande.objects.filter(
-                 statut='BROUILLON'
-             ).count(),
-             'fournisseurs_actifs': Commande.objects.values(
-                 'fournisseur'
-             ).distinct().count(),
-         }
-         return Response(stats)
-
-class LigneCommandeViewSet(viewsets.ModelViewSet):
-     queryset = LigneCommande.objects.all()
-     serializer_class = LigneCommandeSerializer,
     
+    
+   
 
 class FournisseurViewSet(viewsets.ModelViewSet):
     queryset = Fournisseur.objects.all()
@@ -375,8 +320,45 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
         commande.refresh_from_db()
         commande.total_commande = commande.total_ttc
         commande.save(update_fields=['total_commande'])
+    
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
         
+        # Solution 1: Vérification avant suppression
+        if not instance.can_be_deleted():
+            return Response(
+                {
+                    "error": "Impossible de supprimer ce produit",
+                    "detail": f"Le produit est utilisé dans {instance.lignes_commande.count()} commande(s)",
+                    "solution": "Marquez-le comme inactif à la place",
+                    "commandes": [str(cmd) for cmd in instance.lignes_commande.all()[:5]]  # Affiche les 5 premières commandes
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Solution 2: Marquer comme inactif au lieu de supprimer
+        # instance.mark_as_inactive()
+        # return Response(status=status.HTTP_204_NO_CONTENT)
+        
+        # Ou suppression réelle si aucune commande
+        return super().destroy(request, *args, **kwargs)
+
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['get'])
+    def can_delete(self, request, pk=None):
+        produit = self.get_object()
+        return Response({
+            'can_delete': produit.can_be_deleted(),
+            'used_in_commands': produit.lignes_commande.count()
+        })
+
+    @action(detail=True, methods=['patch'])
+    def mark_inactive(self, request, pk=None):
+        produit = self.get_object()
+        produit.mark_as_inactive()
+        return Response({'status': 'marked inactive'}, status=status.HTTP_200_OK)
+
 
 
 from rest_framework.decorators import api_view
@@ -576,7 +558,6 @@ from rest_framework.response import Response
 from django.contrib.auth.models import Group, Permission
 from .models import Utilisateur
 from .serializers import (
-    UserSerializer,
     UserCreateSerializer,
     GroupSerializer,
     PermissionSerializer
@@ -590,7 +571,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action == 'create':
             return UserCreateSerializer
-        return UserSerializer
+        return UtilisateurSerializer
 
     def perform_create(self, serializer):
         password = make_password(self.request.data.get('password'))

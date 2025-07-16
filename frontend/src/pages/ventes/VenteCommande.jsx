@@ -115,7 +115,14 @@ const VenteCommande = () => {
   const [success, setSuccess] = useState(null);
   const [scanMode, setScanMode] = useState(false);
   const [scanStatus, setScanStatus] = useState('');
-
+useEffect(() => {
+  // Ce useEffect garantit que les manipulations DOM sont sécurisées
+  const parent = document.getElementById('root'); // ou ton ID de conteneur principal
+  if (parent) {
+    // Ici tu peux ajouter tes manipulations DOM si nécessaire
+    // Mais en React, il vaut mieux éviter et utiliser le state/react-dom
+  }
+}, []);
   const handleBarcodeScanned = useCallback((barcode) => {
     setScanStatus(`Code scanné: ${barcode}`);
     
@@ -137,7 +144,7 @@ const VenteCommande = () => {
   useEffect(() => {
     const loadDirectClient = async () => {
       try {
-        const response = await axios.get('/api/clients/3/');
+        const response = await axios.get('/api/clients/1/');
         setDirectClient(response.data);
         if (typeTransaction === 'VENTE_DIRECTE') {
           setClient(response.data);
@@ -189,42 +196,63 @@ const VenteCommande = () => {
   };
 
   const handleSubmit = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      if (products.length === 0) {
-        throw new Error("Ajoutez au moins un produit");
-      }
-
-      const payload = {
-        client: typeTransaction === 'VENTE_DIRECTE' ? 3 : client?.id,
-        is_vente_directe: typeTransaction === 'VENTE_DIRECTE',
-        statut: typeTransaction === 'VENTE_DIRECTE' ? 'VALIDEE' : 'BROUILLON',
-        tva: tva,
-        lignes: products.map(item => ({
-          produit: item.product.id,
-          quantite: item.quantity,
-          prix_unitaire: item.unitPrice,
-          remise_ligne: item.discount
-        }))
-      };
-
-      const response = await axios.post('/api/commandes-client/', payload);
-      
-      if (response.status === 201) {
-        setSuccess("Transaction enregistrée avec succès!");
-        setProducts([]);
-      }
-    } catch (error) {
-      const errorMessage = error.response?.data?.detail || 
-                         error.response?.data?.message || 
-                         error.message;
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
+  setLoading(true);
+  setError(null);
+  
+  try {
+    // Validations renforcées
+    if (products.length === 0) {
+      throw new Error("Ajoutez au moins un produit");
     }
-  };
+
+    // Construction du payload optimisé
+    const payload = {
+      client: typeTransaction === 'VENTE_DIRECTE' ? directClient.id : client?.id,
+      is_vente_directe: typeTransaction === 'VENTE_DIRECTE',
+      statut: typeTransaction === 'VENTE_DIRECTE' ? 'VALIDEE' : 'BROUILLON',
+      tva: parseFloat(tva),  // Conversion en float
+      lignes: products.map(item => ({
+        produit: item.product.id,
+        quantite: parseInt(item.quantity),  // Conversion en int
+        prix_unitaire: parseFloat(item.unitPrice),  // Conversion en float
+        remise_ligne: parseFloat(item.discount)  // Conversion en float
+      }))
+    };
+
+    // Debug: Afficher le payload avant envoi
+    console.log("Payload envoyé:", JSON.stringify(payload, null, 2));
+
+    const response = await axios.post('/api/commandes-client/', payload, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (response.status === 201) {
+      setSuccess("Transaction enregistrée avec succès!");
+      setProducts([]);
+    }
+  } catch (error) {
+    // Gestion d'erreur améliorée
+    let errorMessage = "Erreur lors de l'envoi";
+    
+    if (error.response) {
+      console.error("Réponse erreur:", error.response.data);
+      errorMessage = error.response.data.detail || 
+                   JSON.stringify(error.response.data);
+    } else if (error.request) {
+      console.error("Pas de réponse:", error.request);
+      errorMessage = "Pas de réponse du serveur";
+    } else {
+      console.error("Erreur:", error.message);
+      errorMessage = error.message;
+    }
+    
+    setError(errorMessage);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const calculateTotal = () => {
     return products.reduce((total, item) => {

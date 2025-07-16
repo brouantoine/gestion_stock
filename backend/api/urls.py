@@ -7,8 +7,6 @@ from .views import (
     ClientViewSet,
     UserModulesView, 
     UtilisateurViewSet,
-    CommandeViewSet, 
-    LigneCommandeViewSet,
     CommandeClientViewSet,
     UpdateUserRoleView,
     UserViewSet,
@@ -33,8 +31,6 @@ from rest_framework_simplejwt.views import (
 router = DefaultRouter()
 router.register(r'commandes-client', CommandeClientViewSet, basename='commandeclient')
 router.register(r'produits', ProduitViewSet, basename='produit')
-router.register(r'commandes', CommandeViewSet, basename='commande')
-router.register(r'lignes-commande', LigneCommandeViewSet, basename='lignecommande')
 router.register(r'fournisseurs', FournisseurViewSet)
 router.register(r'utilisateurs', UtilisateurViewSet, basename='utilisateur')
 router.register(r'clients', ClientViewSet, basename='client')
@@ -59,6 +55,8 @@ urlpatterns = [
     path('user/modules/', UserModulesView.as_view(), name='user-modules'),
     path('users/<int:user_id>/reset_password/', PasswordResetView.as_view(), name='reset-password'),
     path("ws/barcode/", BarcodeConsumer.as_asgi()),
+    path('produits/<int:pk>/can_delete/', ProduitViewSet.as_view({'get': 'can_delete'}), name='produit-can-delete'),
+    path('produits/<int:pk>/mark_inactive/', ProduitViewSet.as_view({'patch': 'mark_inactive'}), name='produit-mark-inactive'),
 ]
 
 # urlpatterns = [

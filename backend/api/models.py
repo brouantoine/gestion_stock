@@ -46,6 +46,72 @@ class Utilisateur(AbstractUser):
             ("change_role", "Peut modifier les rôles"),
         ]
 
+
+from django.db import models
+from django.core.validators import MinValueValidator
+import uuid
+from datetime import datetime
+
+class Commande(models.Model):
+    STATUS_CHOICES = [
+        ('BROUILLON', 'Brouillon'),
+        ('VALIDEE', 'Validée'),
+        ('LIVREE', 'Livrée'),
+        ('ANNULEE', 'Annulée'),
+    ]
+    
+    code_commande = models.CharField(max_length=20, unique=True, editable=False)
+    fournisseur = models.ForeignKey('Fournisseur', on_delete=models.PROTECT, related_name='commandes')
+    type_produit = models.CharField(max_length=50)
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_validation = models.DateTimeField(null=True, blank=True)
+    statut = models.CharField(max_length=20, choices=STATUS_CHOICES, default='BROUILLON')
+    utilisateur = models.ForeignKey('Utilisateur', on_delete=models.PROTECT)
+    notes = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"{self.code_commande} - {self.fournisseur.nom_fournisseur}"
+
+    def generate_code(self):
+        date_part = self.date_creation.strftime('%Y%m%d')
+        unique_part = uuid.uuid4().hex[:6].upper()
+        return f"CMD-{date_part}-{unique_part}"
+
+    def save(self, *args, **kwargs):
+        if not self.code_commande:
+            self.code_commande = self.generate_code()
+        super().save(*args, **kwargs)
+
+    @property
+    def prix_total(self):
+        return sum(ligne.total_ligne_ht for ligne in self.lignes.all())
+
+class LigneCommande(models.Model):
+    STATUT_LIVRAISON_CHOICES = [
+        ('A_LIVRER', 'À livrer'),
+        ('PARTIELLE', 'Livraison partielle'),
+        ('LIVREE', 'Livrée'),
+    ]
+    
+    commande = models.ForeignKey(Commande, on_delete=models.CASCADE, related_name='lignes')
+    produit = models.ForeignKey('Produit', on_delete=models.PROTECT, related_name='lignecommandes')
+    quantite = models.IntegerField(validators=[MinValueValidator(1)])
+    prix_unitaire = models.DecimalField(max_digits=10, decimal_places=2)
+    remise_ligne = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    date_livraison_prevue = models.DateField(null=True, blank=True)
+    statut_livraison = models.CharField(
+        max_length=20, 
+        choices=STATUT_LIVRAISON_CHOICES, 
+        default='A_LIVRER'
+    )
+
+    def __str__(self):
+        return f"{self.quantite}x {self.produit.reference}"
+
+    @property
+    def total_ligne_ht(self):
+        return (self.quantite * self.prix_unitaire) * (1 - self.remise_ligne / 100)
+
 class Client(models.Model):
     nom_client = models.CharField(max_length=255)
     adresse = models.TextField()
@@ -105,7 +171,7 @@ class Produit(models.Model):
     seuil_alerte = models.IntegerField(default=5)
     unite_mesure = models.CharField(max_length=10, choices=UNITE_CHOICES, default='unite')
     date_creation = models.DateTimeField(auto_now_add=True)
-    est_actif = models.BooleanField(default=True)
+    est_actif = models.BooleanField(default=True, verbose_name="Actif")
     image = models.ImageField(upload_to='produits/', blank=True)
     code_barre = models.CharField(max_length=50, blank=True)
     tva = models.ForeignKey(Taxe, on_delete=models.PROTECT, null=True)
@@ -129,63 +195,24 @@ class Produit(models.Model):
     def __str__(self):
         return f"{self.designation} ({self.reference})"
     
-class Commande(models.Model):
-    STATUS_CHOICES = [
-        ('BROUILLON', 'Brouillon'),
-        ('VALIDEE', 'Validée'),
-        ('LIVREE', 'Livrée'),
-        ('ANNULEE', 'Annulée'),]
-    code_commande = models.CharField(max_length=20,unique=True,editable=False,  )
-    fournisseur = models.ForeignKey('Fournisseur', on_delete=models.PROTECT, related_name='commandes' )
-    type_produit = models.CharField(max_length=50,  blank=False, null=False)  # Type de produit commandé
-    prix_unitaires = models.DecimalField(max_digits=10, decimal_places=2, default=0, blank=True, null=True)
-    quantite = models.IntegerField(validators=[MinValueValidator(1)])
-    prix_total = models.DecimalField(max_digits=10, decimal_places=0, default=0, blank=True, null=True)
-    date_creation = models.DateTimeField(auto_now_add=True)
-    date_validation = models.DateTimeField(null=True, blank=True)
-    statut = models.CharField(max_length=20, choices=STATUS_CHOICES, default='BROUILLON')
-    utilisateur = models.ForeignKey(Utilisateur, on_delete=models.PROTECT)
-    notes = models.TextField(blank=True)
+    def delete(self, *args, **kwargs):
+        """Override delete to archive instead"""
+        if self.can_be_deleted():
+            return super().delete(*args, **kwargs)
+        self.est_actif = False
+        self.save()
+        return (1, {}) 
     
-    def __str__(self):
-        return f"Commande {self.type_produit} - {self.fournisseur}"
-    
-    @property
-    def total_ht(self):
-        return sum(ligne.total_ligne_ht for ligne in self.lignes.all())
-    
-    @property
-    def total_ttc(self):
-        return self.total_ht  # Ajouter taxes si nécessaire
-    def generate_code(self):
-        """Génère un code unique basé sur la date et un identifiant unique"""
-        date_part = self.date_creation.strftime('%Y%m%d') if self.date_creation else datetime.now().strftime('%Y%m%d')
-        unique_part = uuid.uuid4().hex[:6].upper()
-        return f"CMD-{date_part}-{unique_part}"
+    def can_be_deleted(self):
+        """Vérifie si le produit peut être supprimé"""
+        return not self.lignecommandes.exists()
 
-    def save(self, *args, **kwargs):
-    # Génère un code seulement si vide ou None (pas si "")
-        if not self.code_commande:  # Cela capture None et "" 
-            self.code_commande = self.generate_code()
-        super().save(*args, **kwargs)
+    def mark_as_inactive(self):
+        """Marque le produit comme inactif au lieu de le supprimer"""
+        self.est_actif = False
+        self.save()
+        return True
 
-class LigneCommande(models.Model):
-    commande = models.ForeignKey(Commande, on_delete=models.CASCADE, related_name='lignes')
-    produit = models.ForeignKey(Produit, on_delete=models.PROTECT, related_name='lignecommandes')
-    quantite = models.IntegerField(validators=[MinValueValidator(1)])
-    prix_unitaire = models.DecimalField(max_digits=10, decimal_places=2)
-    remise_ligne = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    date_livraison_prevue = models.DateField(null=True, blank=True)
-    statut_livraison = models.CharField(max_length=20, default='A_LIVRER')
-    
-    def __str__(self):
-        return f"{self.quantite}x {self.produit}"
-    
-    @property
-    def total_ligne_ht(self):
-        return (self.quantite * self.prix_unitaire) * (1 - self.remise_ligne / 100)
-    
-    
 class MouvementStock(models.Model):
     TYPE_MOUVEMENT = (
         ('entree', 'Entrée'),
@@ -467,7 +494,7 @@ class CommandeClient(models.Model):
 
 class LigneCommandeClient(models.Model):
     commande = models.ForeignKey(CommandeClient, on_delete=models.CASCADE, related_name='lignes')
-    produit = models.ForeignKey('Produit', on_delete=models.PROTECT)
+    produit = models.ForeignKey('Produit', on_delete=models.SET_NULL, null=True)
     quantite = models.IntegerField(validators=[MinValueValidator(1)])
     prix_unitaire = models.DecimalField(max_digits=10, decimal_places=2)  # Prix au moment de la commande
     remise_ligne = models.DecimalField(max_digits=5, decimal_places=2, default=0)  # Remise en % par produit
@@ -484,5 +511,3 @@ class LigneCommandeClient(models.Model):
             return (quantite * prix) * (1 - remise / 100)
         except (TypeError, AttributeError):
             return 0
-
-from django.db import models
