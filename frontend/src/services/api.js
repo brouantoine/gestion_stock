@@ -4,37 +4,59 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: 'http://localhost:8000/api/',
   headers: { 'Content-Type': 'application/json' },
-  timeout: 10000, // Ajout d'un timeout
+  timeout: 10000,
 });
 
-// Intercepteur pour ajouter le token JWT si nécessaire
+// Intercepteur pour le token JWT
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// Intercepteur pour gérer les erreurs globales
+// Intercepteur pour les erreurs globales
 api.interceptors.response.use(
   response => response,
   error => {
     if (error.response?.status === 401) {
-      // Gérer la déconnexion si token expiré
       localStorage.removeItem('token');
       window.location = '/login';
     }
     return Promise.reject(error);
   }
 );
-export const commandeService = {
-  getCommandes: (params = {}) => api.get('commandes-client/', { params }),
-  getCommande: (id) => api.get(`commandes-client/${id}/`),
-  createCommande: (data) => api.post('commandes-client/', data),
-  updateCommande: (id, data) => api.patch(`commandes-client/${id}/`, data),
-  deleteCommande: (id) => api.delete(`commandes-client/${id}/`),
-  getLignesCommande: (commandeId) => api.get(`commandes-client/${commandeId}/lignes/`),
-  addLigneCommande: (commandeId, data) => api.post(`commandes-client/${commandeId}/lignes/`, data),
-  updateLigneCommande: (commandeId, ligneId, data) => api.patch(`commandes-client/${commandeId}/lignes/${ligneId}/`, data),
-  deleteLigneCommande: (commandeId, ligneId) => api.delete(`commandes-client/${commandeId}/lignes/${ligneId}/`),
+
+// Objet centralisé pour toutes les requêtes
+const ApiService = {
+  // Commandes
+  commandes: {
+    getAll: () => api.get('/commandes/'),
+    getById: (id) => api.get(`/commandes/${id}/`),
+    create: (data) => api.post('/commandes/', data),
+    update: (id, data) => api.patch(`/commandes/${id}/`, data),
+    delete: (id) => api.delete(`/commandes/${id}/`),
+  },
+
+  // Produits
+  produits: {
+    getAll: () => api.get('/produits/'),
+    getById: (id) => api.get(`/produits/${id}/`),
+  },
+
+  // Fournisseurs
+  fournisseurs: {
+    getAll: () => api.get('/fournisseurs/'),
+  },
+
+  // Authentification
+  auth: {
+    login: (credentials) => api.post('/token/', credentials),
+    logout: () => {
+      localStorage.removeItem('token');
+      return Promise.resolve();
+    },
+    refreshToken: (refresh) => api.post('/token/refresh/', { refresh }),
+  },
 };
-export default api;
+
+export default ApiService;

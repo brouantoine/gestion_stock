@@ -9,7 +9,7 @@ import {
   BarChartOutlined,
   DollarOutlined,
   ArrowRightOutlined,
-  SettingOutlined
+ ProfileOutlined
 } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
 
@@ -65,12 +65,12 @@ const ALL_MODULES_CONFIG = {
     path: '/utilisateurs',
     color: 'purple'
   },
-    CONFIGURATION: {
-    code: 'CONFIGURATION',
-    nom: 'Configuration',
-    description: 'Gestion des utilisateurs et permissions',
-    icon: <SettingOutlined />,
-    path: '/configuration',
+  RAPPORT: {
+    code: 'RAPPORT',
+    nom: 'Rapports',
+    description: 'Rapports des activités',
+    icon: <ProfileOutlined />,
+    path: '/rapport',
     allowedRoles: ['admin']
   }
 };

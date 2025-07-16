@@ -85,19 +85,27 @@ class LigneCommandeClientSerializer(serializers.ModelSerializer):
             return 0
 
 class CommandeClientSerializer(serializers.ModelSerializer):
-    lignes = LigneCommandeClientSerializer(many=True)
-    
+    lignes = LigneCommandeClientSerializer(many=True, default=[])
+    tva = serializers.PrimaryKeyRelatedField(
+        queryset=Taxe.objects.all(),
+        required=True,
+        error_messages={
+            'required': 'Veuillez sélectionner une TVA',
+            'does_not_exist': 'La TVA sélectionnée n\'existe pas'
+        }
+    )
     class Meta:
         model = CommandeClient
         fields = [
-            'id', 'client', 'date_creation', 'statut',
+            'id', 'client','tva', 'date_creation', 'statut',
             'is_vente_directe', 'notes', 'lignes', 'total_ht'
         ]
         read_only_fields = ['id', 'date_creation', 'total_ht']
         extra_kwargs = {
-            'client': {'required': False}
+            'client': {'required': False},
+            'tva' : {'required': False},
         }
-
+    
     def validate(self, data):
         if not data.get('is_vente_directe') and not data.get('client'):
             raise serializers.ValidationError(
@@ -137,7 +145,7 @@ class CommandeClientSerializer(serializers.ModelSerializer):
                 LigneCommandeClient.objects.create(commande=instance, **ligne_data)
         
         return instance
-
+    
 class PermissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Permission
@@ -190,3 +198,80 @@ class UserCreateSerializer(serializers.ModelSerializer):
             is_active=validated_data.get('is_active', True)
         )
         return user
+
+class LigneCommandeSerializer(serializers.ModelSerializer):
+    produit = ProduitSerializer(read_only=True)
+    produit_id = serializers.PrimaryKeyRelatedField(
+        queryset=Produit.objects.all(),
+        source='produit',
+        write_only=True
+    )
+    total_ligne_ht = serializers.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        read_only=True
+    )
+
+    class Meta:
+        model = LigneCommande
+        fields = [
+            'id', 'produit', 'produit_id', 'quantite', 
+            'prix_unitaire', 'remise_ligne', 'total_ligne_ht',
+            'date_livraison_prevue', 'statut_livraison'
+        ]
+        extra_kwargs = {
+            'quantite': {'min_value': 1},
+            'prix_unitaire': {'min_value': 0}
+        }
+
+class CommandeSerializer(serializers.ModelSerializer):
+    fournisseur = serializers.PrimaryKeyRelatedField(
+        queryset=Fournisseur.objects.all()
+    )
+    utilisateur = serializers.PrimaryKeyRelatedField(
+        queryset=Utilisateur.objects.all(),
+        default=serializers.CurrentUserDefault()
+    )
+    lignes = LigneCommandeSerializer(many=True, required=False)
+    prix_total = serializers.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        read_only=True
+    )
+
+    class Meta:
+        model = Commande
+        fields = [
+            'id', 'code_commande', 'fournisseur', 'type_produit',
+            'date_creation', 'date_validation', 'statut',
+            'utilisateur', 'notes', 'lignes', 'prix_total'
+        ]
+        read_only_fields = ['code_commande', 'date_creation', 'prix_total']
+
+    def create(self, validated_data):
+        lignes_data = validated_data.pop('lignes', [])
+        commande = Commande.objects.create(**validated_data)
+        
+        for ligne_data in lignes_data:
+            LigneCommande.objects.create(commande=commande, **ligne_data)
+            
+        return commande
+
+    def update(self, instance, validated_data):
+        lignes_data = validated_data.pop('lignes', None)
+        
+        # Mise à jour des champs de base
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Gestion des lignes si fournies
+        if lignes_data is not None:
+            # Supprimer les anciennes lignes
+            instance.lignes.all().delete()
+            
+            # Créer les nouvelles lignes
+            for ligne_data in lignes_data:
+                LigneCommande.objects.create(commande=instance, **ligne_data)
+        
+        return instance

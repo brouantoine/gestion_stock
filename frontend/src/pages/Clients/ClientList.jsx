@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Card, Button, Space, Tag, message } from 'antd';
-import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Table, Card, Tag, message } from 'antd';
 import axios from 'axios';
 
 const ClientList = () => {
@@ -54,27 +53,15 @@ const ClientList = () => {
       key: 'siret',
       render: (siret) => siret || <Tag color="orange">Non renseigné</Tag>,
     },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 120,
-      render: (_, record) => (
-        <Space size="small">
-          <Button icon={<EyeOutlined />} onClick={() => viewClient(record.id)} />
-          <Button icon={<EditOutlined />} onClick={() => editClient(record.id)} />
-          <Button danger icon={<DeleteOutlined />} onClick={() => deleteClient(record.id)} />
-        </Space>
-      ),
-    },
+    // J'ai supprimé la colonne 'Actions' entièrement
   ];
 
+  // J'ai conservé ces fonctions au cas où elles seraient utilisées ailleurs
   const viewClient = (id) => {
-    // Implémentez la navigation vers la vue détaillée
     console.log('Voir client', id);
   };
 
   const editClient = (id) => {
-    // Implémentez l'édition
     console.log('Éditer client', id);
   };
 
@@ -92,11 +79,7 @@ const ClientList = () => {
     <div style={{ padding: 24 }}>
       <Card
         title="Liste des Clients"
-        extra={
-          <Button type="primary" icon={<PlusOutlined />}>
-            Ajouter un client
-          </Button>
-        }
+        // J'ai supprimé le bouton "Ajouter un client" dans l'extra
       >
         <Table
           columns={columns}

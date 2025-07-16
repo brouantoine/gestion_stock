@@ -553,16 +553,12 @@ class UserModulesView(APIView):
 
     def get(self, request):
         ROLE_MODULES = {
-            'admin': ['VENTE', 'PRODUIT', 'COMMANDE', 'CLIENT', 'STATS', 'UTILISATEUR', 'CONFIGURATION'],
-            'gestionnaire': ['PRODUIT', 'COMMANDE', 'STATS'],
-            'vendeur': ['VENTE', 'CLIENT', 'STATS']
+            'admin': ['VENTE', 'PRODUIT', 'COMMANDE', 'CLIENT', 'STATS', 'UTILISATEUR', 'RAPPORT'],
+            'gestionnaire': ['PRODUIT', 'COMMANDE', 'STATS','RAPPORT'],
+            'vendeur': ['VENTE', 'CLIENT', 'STATS','RAPPORT'],
         }
         return Response({"modules": ROLE_MODULES.get(request.user.role, [])})
     
-class ConfigurationView(APIView):
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
-
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from django.contrib.auth.models import Group, Permission
@@ -653,3 +649,121 @@ def scan_barcode(request):
         )
         
         return JsonResponse({"status": "success"})
+
+from rest_framework import viewsets, permissions
+from .models import Commande
+from .serializers import CommandeSerializer
+
+class CommandeViewSet(viewsets.ModelViewSet):
+    queryset = Commande.objects.all()
+    serializer_class = CommandeSerializer
+    # permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Filtres possibles
+        fournisseur = self.request.query_params.get('fournisseur')
+        statut = self.request.query_params.get('statut')
+        
+        if fournisseur:
+            queryset = queryset.filter(fournisseur_id=fournisseur)
+        if statut:
+            queryset = queryset.filter(statut=statut)
+            
+        return queryset.order_by('-date_creation')
+
+# api/views.py
+from django.db.models import Count, Sum, Q
+from django.utils import timezone
+from datetime import timedelta
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import (
+    CommandeClient, Vente, MouvementStock, 
+    Produit, ActivityLog, Utilisateur
+)
+
+@api_view(['GET'])
+def rapport_activites(request):
+    try:
+        # Paramètres de période (par défaut: 30 derniers jours)
+        days = int(request.GET.get('days', 30))
+        end_date = timezone.now().date()
+        start_date = end_date - timedelta(days=days)
+        
+        # 1. Statistiques globales
+        ventes = CommandeClient.objects.filter(
+            date_creation__date__gte=start_date,
+            date_creation__date__lte=end_date,
+            statut__in=['VALIDEE', 'LIVREE']
+        )
+        
+        total_ventes = ventes.count()
+        ventes_directes = ventes.filter(Q(client__isnull=True) | Q(client__is_direct=True)).count()
+        commandes_clients = total_ventes - ventes_directes
+        
+        ca_total = ventes.aggregate(total=Sum('total_commande'))['total'] or 0
+        ca_direct = ventes.filter(Q(client__isnull=True) | Q(client__is_direct=True)) \
+                         .aggregate(total=Sum('total_commande'))['total'] or 0
+        ca_commandes = ca_total - ca_direct
+        
+        # 2. Statistiques par jour
+        daily_stats = []
+        current_date = start_date
+        while current_date <= end_date:
+            day_ventes = ventes.filter(date_creation__date=current_date)
+            day_direct = day_ventes.filter(Q(client__isnull=True) | Q(client__is_direct=True))
+            
+            daily_stats.append({
+                'date': current_date.strftime('%Y-%m-%d'),
+                'ca_ht': float(day_ventes.aggregate(total=Sum('total_commande'))['total'] or 0),
+                'ventes': day_ventes.count(),
+                'ventes_directes': day_direct.count(),
+                'commandes_clients': day_ventes.count() - day_direct.count()
+            })
+            current_date += timedelta(days=1)
+        
+        # 3. Activités récentes
+        recent_activities = ActivityLog.objects \
+            .select_related('user') \
+            .order_by('-timestamp')[:20] \
+            .values('id', 'action', 'details', 'timestamp', 'user__username')
+        
+        # 4. Alertes stock
+        stock_alerts = Produit.objects.filter(
+            Q(quantite_stock=0) | 
+            Q(quantite_stock__lte=F('seuil_alerte'))
+        ).values('id', 'designation', 'quantite_stock', 'seuil_alerte')
+        
+        # 5. Commandes récentes
+        recent_commands = CommandeClient.objects \
+            .select_related('client') \
+            .filter(date_creation__gte=start_date) \
+            .order_by('-date_creation')[:10] \
+            .values(
+                'id', 'numero_commande', 'total_commande',
+                'date_creation', 'client__nom_client',
+                is_vente_directe=Q(client__isnull=True) | Q(client__is_direct=True))
+        
+        return Response({
+            'global_stats': {
+                'total_ca': float(ca_total),
+                'total_ventes': total_ventes,
+                'ventes_directes': ventes_directes,
+                'commandes_clients': commandes_clients,
+                'ca_ventes_directes': float(ca_direct),
+                'ca_commandes': float(ca_commandes),
+                'avg_ventes': total_ventes / days if days > 0 else 0
+            },
+            'daily_stats': daily_stats,
+            'recent_activities': recent_activities,
+            'stock_alerts': stock_alerts,
+            'recent_commands': recent_commands
+        })
+
+    except Exception as e:
+        return Response({
+            'error': str(e),
+            'message': 'Erreur lors de la génération du rapport'
+        }, status=500)

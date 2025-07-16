@@ -1,0 +1,46 @@
+.client-list-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.client-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+.client-table th {
+  text-align: left;
+  padding: 12px 16px;
+  background-color: #f8f9fa;
+  border-bottom: 2px solid #e9ecef;
+  font-weight: 500;
+  color: #495057;
+}
+
+.client-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e9ecef;
+  vertical-align: top;
+}
+
+.client-table tr:hover {
+  background-color: #f8f9fa;
+}
+
+.client-name {
+  font-weight: 500;
+  color: #212529;
+}
+
+.client-contact {
+  color: #6c757d;
+  font-size: 0.9em;
+}
+
+.client-date {
+  color: #6c757d;
+  font-size: 0.85em;
+  white-space: nowrap;
+}

@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
+    CommandeViewSet,
     CurrentUserView,
     FournisseurViewSet, 
     ProduitViewSet, 
@@ -18,6 +19,8 @@ from .views import (
     api_performance_vendeur,
     statistiques_commandes,  # Importez votre vue personnalisée
     user_activity,
+    rapport_activites
+    
 )
 from django.urls import path
 from rest_framework_simplejwt.views import (
@@ -37,7 +40,7 @@ router.register(r'clients', ClientViewSet, basename='client')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'groups', GroupViewSet, basename='group')
 router.register(r'permissions', PermissionViewSet, basename='permission')
-
+router.register(r'commandes', CommandeViewSet, basename='commande')
 urlpatterns = [
     path('', include(router.urls)),
     
@@ -57,6 +60,7 @@ urlpatterns = [
     path("ws/barcode/", BarcodeConsumer.as_asgi()),
     path('produits/<int:pk>/can_delete/', ProduitViewSet.as_view({'get': 'can_delete'}), name='produit-can-delete'),
     path('produits/<int:pk>/mark_inactive/', ProduitViewSet.as_view({'patch': 'mark_inactive'}), name='produit-mark-inactive'),
+    path('rapports/activites/', rapport_activites, name='rapport-activites'),
 ]
 
 # urlpatterns = [

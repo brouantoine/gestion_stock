@@ -6,13 +6,13 @@ import NavBar from './components/NavBar';
 import ProduitList from './pages/Produits/ProduitList';
 import Dashboard from './pages/Dashboard/Dashboard';
 import ClientList from './pages/Clients/ClientList';
-import ClientDetail from './pages/Clients/ClientDetail';
 import UtilisateurList from './pages/utilisateurs/utilisateurList';
 import UtilisateurPerformance from './pages/utilisateurs/UtilisateurPerformance';
 import StatistiquesBoite from './pages/statistiques/statistiques';
 import VenteCommande from './pages/ventes/VenteCommande';
-import Configuration from './config/Configuration';
-import CommandeList from './pages/commandes/CommandeList';
+import Rapport from './config/Rapport';
+import CommandesList from './pages/commandes/commandesListe';
+
 function App() {
   return (
     <Routes>
@@ -30,13 +30,12 @@ function App() {
             <Routes>
               <Route path="/produits" element={<ProduitList />} />
               <Route path="/clients" element={<ClientList />} />
-              <Route path="/clients/:id" element={<ClientDetail />} />
               <Route path="/utilisateurs" element={<UtilisateurList />} />
               <Route path="/utilisateurs/:userId/performance" element={<UtilisateurPerformance />} />
               <Route path="/statistiques" element={<StatistiquesBoite />} />
               <Route path="/ventecommande" element={<VenteCommande />} />
-              <Route path="/configuration" element={<Configuration />} />
-              <Route path="/commandes" element={<CommandeList />} />
+              <Route path="/rapport" element={<Rapport />} />
+              <Route path="/commandes" element={<CommandesList />} />
             </Routes>
           </NavBar>
         } />
