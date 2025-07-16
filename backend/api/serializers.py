@@ -63,18 +63,26 @@ class ClientSerializer(serializers.ModelSerializer):
 
 class LigneCommandeClientSerializer(serializers.ModelSerializer):
     produit = serializers.PrimaryKeyRelatedField(queryset=Produit.objects.all())
+    total_ligne_ht = serializers.SerializerMethodField()  # Champ calculé
     
     class Meta:
         model = LigneCommandeClient
         fields = [
             'id', 'produit', 'quantite', 'prix_unitaire', 
-            'remise_ligne', 'total_ligne_ht'
+            'remise_ligne', 'total_ligne_ht'  # Maintenant valide car c'est un SerializerMethodField
         ]
         read_only_fields = ['id', 'total_ligne_ht']
         extra_kwargs = {
             'quantite': {'min_value': 1, 'required': True},
             'prix_unitaire': {'min_value': 0, 'required': True}
         }
+
+    def get_total_ligne_ht(self, obj):
+        """Calcule le total HT de la ligne"""
+        try:
+            return (obj.quantite * obj.prix_unitaire) * (1 - obj.remise_ligne / 100)
+        except (TypeError, AttributeError):
+            return 0
 
 class CommandeClientSerializer(serializers.ModelSerializer):
     lignes = LigneCommandeClientSerializer(many=True)
@@ -96,6 +104,39 @@ class CommandeClientSerializer(serializers.ModelSerializer):
                 "Un client est requis pour les commandes non-directes"
             )
         return data
+
+    def create(self, validated_data):
+        # Extraire les données des lignes de commande
+        lignes_data = validated_data.pop('lignes')
+        
+        # Créer la commande client
+        commande = CommandeClient.objects.create(**validated_data)
+        
+        # Créer les lignes de commande associées
+        for ligne_data in lignes_data:
+            LigneCommandeClient.objects.create(commande=commande, **ligne_data)
+        
+        return commande
+
+    def update(self, instance, validated_data):
+        # Gestion des lignes lors de la mise à jour
+        lignes_data = validated_data.pop('lignes', None)
+        
+        # Mise à jour des champs de base
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Gestion des lignes si fournies
+        if lignes_data is not None:
+            # Supprimer les anciennes lignes
+            instance.lignes.all().delete()
+            
+            # Créer les nouvelles lignes
+            for ligne_data in lignes_data:
+                LigneCommandeClient.objects.create(commande=instance, **ligne_data)
+        
+        return instance
 
 class PermissionSerializer(serializers.ModelSerializer):
     class Meta:

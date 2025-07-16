@@ -104,7 +104,12 @@ class LigneCommande(models.Model):
         choices=STATUT_LIVRAISON_CHOICES, 
         default='A_LIVRER'
     )
-
+    total_ligne_ht = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2,
+        editable=False,
+        default=0
+    )
     def __str__(self):
         return f"{self.quantite}x {self.produit.reference}"
 
@@ -447,14 +452,19 @@ class CommandeClient(models.Model):
     date_creation = models.DateTimeField(auto_now_add=True)
     date_livraison_prevue = models.DateTimeField(null=True, blank=True)
     date_livraison_reelle = models.DateTimeField(null=True, blank=True)
-    
+    is_vente_directe = models.BooleanField(default=False)
     # État
     statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='BROUILLON')
     est_payee = models.BooleanField(default=False)
     
     # Financier
     remise = models.DecimalField(max_digits=5, decimal_places=2, default=0)  # Remise globale en %
-    tva = models.ForeignKey('Taxe', on_delete=models.PROTECT)
+    tva = models.ForeignKey(
+        'Taxe', 
+        on_delete=models.PROTECT, null=True, blank=True,
+        default=1, 
+        verbose_name="TVA applicable"
+    )
     notes = models.TextField(blank=True)
     total_commande = models.DecimalField(max_digits=10, decimal_places=2, default=0, blank=True)  # Total TTC
     class Meta:

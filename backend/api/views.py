@@ -244,6 +244,13 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 
+from rest_framework.response import Response
+from rest_framework import status
+from django.db import transaction
+from rest_framework.decorators import action
+from django.core.exceptions import ValidationError
+from rest_framework.exceptions import APIException
+
 class CommandeClientViewSet(viewsets.ModelViewSet):
     queryset = CommandeClient.objects.all()
     serializer_class = CommandeClientSerializer
@@ -287,79 +294,82 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
                     produits_a_mettre_a_jour.append((produit, quantite))
                     
             except Produit.DoesNotExist:
-                raise ValidationError(f"Produit ID {line['produit']} introuvable")
+                raise APIException(f"Produit ID {line['produit']} introuvable")
             except KeyError as e:
-                raise ValidationError(f"Champ manquant dans la ligne: {str(e)}")
+                raise APIException(f"Champ manquant dans la ligne: {str(e)}")
 
-        # Phase 2: Création de la commande
-        commande = serializer.save()
-        
-        # Création des lignes de commande
-        for line in lignes_data:
-            LigneCommandeClient.objects.create(
-                commande=commande,
-                produit_id=line['produit'],
-                quantite=line['quantite'],
-                prix_unitaire=line['prix_unitaire'],
-                remise_ligne=line.get('remise_ligne', 0)
-            )
+        try:
+            # Phase 2: Création de la commande
+            commande = serializer.save()
+            
+            # Création des lignes de commande
+            for line in lignes_data:
+                LigneCommandeClient.objects.create(
+                    commande=commande,
+                    produit_id=line['produit'],
+                    quantite=line['quantite'],
+                    prix_unitaire=line['prix_unitaire'],
+                    remise_ligne=line.get('remise_ligne', 0)
+                )
 
-        # Phase 3: Mise à jour du stock
-        if is_vente_directe:
-            for produit, quantite in produits_a_mettre_a_jour:
-                produit.quantite_stock -= quantite
-                
-                # Vérification du seuil d'alerte
-                if produit.quantite_stock <= produit.seuil_alerte:
-                    # Ici vous pourriez déclencher une alerte
-                    pass
-                
-                produit.save(update_fields=['quantite_stock'])
-        
-        # Calcul du total
-        commande.refresh_from_db()
-        commande.total_commande = commande.total_ttc
-        commande.save(update_fields=['total_commande'])
-    
+            # Phase 3: Mise à jour du stock
+            if is_vente_directe:
+                for produit, quantite in produits_a_mettre_a_jour:
+                    produit.quantite_stock -= quantite
+                    
+                    # Vérification du seuil d'alerte
+                    if produit.quantite_stock <= produit.seuil_alerte:
+                        # Ici vous pourriez déclencher une alerte
+                        pass
+                    
+                    produit.save(update_fields=['quantite_stock'])
+            
+            # Calcul du total
+            commande.refresh_from_db()
+            commande.total_commande = commande.total_ttc
+            commande.save(update_fields=['total_commande'])
+            
+            # Retourner la réponse
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            
+        except Exception as e:
+            raise APIException(f"Erreur lors de la création de la commande: {str(e)}")
+
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         
-        # Solution 1: Vérification avant suppression
         if not instance.can_be_deleted():
             return Response(
                 {
-                    "error": "Impossible de supprimer ce produit",
-                    "detail": f"Le produit est utilisé dans {instance.lignes_commande.count()} commande(s)",
-                    "solution": "Marquez-le comme inactif à la place",
-                    "commandes": [str(cmd) for cmd in instance.lignes_commande.all()[:5]]  # Affiche les 5 premières commandes
+                    "error": "Impossible de supprimer cette commande",
+                    "detail": "La commande a déjà été validée ou payée",
+                    "solution": "Annulez la commande plutôt que de la supprimer"
                 },
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        # Solution 2: Marquer comme inactif au lieu de supprimer
-        # instance.mark_as_inactive()
-        # return Response(status=status.HTTP_204_NO_CONTENT)
         
-        # Ou suppression réelle si aucune commande
-        return super().destroy(request, *args, **kwargs)
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    
     @action(detail=True, methods=['get'])
     def can_delete(self, request, pk=None):
-        produit = self.get_object()
+        commande = self.get_object()
         return Response({
-            'can_delete': produit.can_be_deleted(),
-            'used_in_commands': produit.lignes_commande.count()
+            'can_delete': commande.can_be_deleted(),
+            'status': commande.statut,
+            'is_paid': commande.est_payee
         })
 
     @action(detail=True, methods=['patch'])
-    def mark_inactive(self, request, pk=None):
-        produit = self.get_object()
-        produit.mark_as_inactive()
-        return Response({'status': 'marked inactive'}, status=status.HTTP_200_OK)
-
-
+    def cancel(self, request, pk=None):
+        commande = self.get_object()
+        if commande.statut == 'ANNULEE':
+            return Response({'status': 'already cancelled'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        commande.statut = 'ANNULEE'
+        commande.save()
+        return Response({'status': 'cancelled'}, status=status.HTTP_200_OK)
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response

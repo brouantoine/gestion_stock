@@ -12,7 +12,7 @@ import UtilisateurPerformance from './pages/utilisateurs/UtilisateurPerformance'
 import StatistiquesBoite from './pages/statistiques/statistiques';
 import VenteCommande from './pages/ventes/VenteCommande';
 import Configuration from './config/Configuration';
-
+import CommandeList from './pages/commandes/CommandeList';
 function App() {
   return (
     <Routes>
@@ -36,6 +36,7 @@ function App() {
               <Route path="/statistiques" element={<StatistiquesBoite />} />
               <Route path="/ventecommande" element={<VenteCommande />} />
               <Route path="/configuration" element={<Configuration />} />
+              <Route path="/commandes" element={<CommandeList />} />
             </Routes>
           </NavBar>
         } />

@@ -26,5 +26,15 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-
+export const commandeService = {
+  getCommandes: (params = {}) => api.get('commandes-client/', { params }),
+  getCommande: (id) => api.get(`commandes-client/${id}/`),
+  createCommande: (data) => api.post('commandes-client/', data),
+  updateCommande: (id, data) => api.patch(`commandes-client/${id}/`, data),
+  deleteCommande: (id) => api.delete(`commandes-client/${id}/`),
+  getLignesCommande: (commandeId) => api.get(`commandes-client/${commandeId}/lignes/`),
+  addLigneCommande: (commandeId, data) => api.post(`commandes-client/${commandeId}/lignes/`, data),
+  updateLigneCommande: (commandeId, ligneId, data) => api.patch(`commandes-client/${commandeId}/lignes/${ligneId}/`, data),
+  deleteLigneCommande: (commandeId, ligneId) => api.delete(`commandes-client/${commandeId}/lignes/${ligneId}/`),
+};
 export default api;
