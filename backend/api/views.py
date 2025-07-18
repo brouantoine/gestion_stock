@@ -1,4 +1,6 @@
 # api/views.py
+from decimal import Decimal
+from django.db.models import Value 
 from urllib import request
 from django.db import models
 from warnings import filters
@@ -674,13 +676,15 @@ class CommandeViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(statut=statut)
             
         return queryset.order_by('-date_creation')
-        
+from django.db.models import Sum, ExpressionWrapper, F, DecimalField, Q
+from datetime import datetime, time as datetime_time, date
+from django.utils import timezone
 from django.db.models import ExpressionWrapper, FloatField
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Sum, Count, F, Q, Avg, Max
-from django.db.models.functions import TruncDay, TruncMonth
+from django.db.models.functions import TruncDay, TruncMonth, Coalesce
 from django.utils import timezone
 from datetime import datetime, timedelta
 import logging
@@ -727,7 +731,7 @@ class RapportAPIView(APIView):
             'produits': self._get_rapport_produits,
             'clients': self._get_rapport_clients,
             'fournisseurs': self._get_rapport_fournisseurs,
-            'vendeurs': self._get_rapport_vendeurs,
+            'utilisateurs': self._get_rapport_utilisateurs,
             'statistiques_commandes': self.statistiques_commandes
         }
         
@@ -1000,58 +1004,7 @@ class RapportAPIView(APIView):
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    def _get_rapport_vendeurs(self, start_date, end_date, request):
-        """Version corrigée du rapport vendeurs"""
-        try:
-            # Gestion des timezones pour les dates
-            if start_date and not timezone.is_aware(start_date):
-                start_date = timezone.make_aware(datetime.combine(start_date, datetime_time.min))
-            if end_date and not timezone.is_aware(end_date):
-                end_date = timezone.make_aware(datetime.combine(end_date, datetime_time.max))
-
-            vendeurs = Utilisateur.objects.filter(
-                role='vendeur'
-            ).annotate(
-                nb_ventes=Count('commande', filter=Q(
-                    commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q(),
-                    commande__statut='VALIDEE'
-                )),
-                total_ca=Coalesce(Sum(
-                    'commande__total_ht',
-                    filter=Q(
-                        commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q(),
-                        commande__statut='VALIDEE'
-                    )
-                ), 0),
-                avg_vente=Coalesce(Avg(
-                    'commande__total_ht',
-                    filter=Q(
-                        commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q(),
-                        commande__statut='VALIDEE'
-                    )
-                ), 0)
-            ).order_by('-total_ca').values(
-                'id', 'username', 'nb_ventes', 'total_ca', 'avg_vente'
-            )
-
-            return Response({
-                "success": True,
-                "data": {
-                    "vendeurs": list(vendeurs),
-                    "periode": {
-                        "debut": start_date.strftime('%Y-%m-%d') if start_date else None,
-                        "fin": end_date.strftime('%Y-%m-%d') if end_date else None
-                    }
-                }
-            })
-
-        except Exception as e:
-            logger.error(f"Erreur rapport vendeurs: {str(e)}", exc_info=True)
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
+    
     def _get_top_produits(self, start_date, end_date, limit=5):
         """Helper pour récupérer les produits les plus vendus"""
         queryset = LigneCommandeClient.objects.filter(
@@ -1065,3 +1018,59 @@ class RapportAPIView(APIView):
             total_ventes=Sum('quantite'),
             total_ca=Sum(F('quantite') * F('prix_unitaire'), output_field=FloatField())
         ).order_by('-total_ca')[:limit]
+    
+    def _get_rapport_utilisateurs(self, start_date, end_date, request):
+        """Rapport des utilisateurs avec toutes les ventes effectuées et CA total"""
+        try:
+            # Conversion des dates en datetime aware
+            start_date = timezone.make_aware(datetime.combine(start_date, datetime_time.min))
+            end_date = timezone.make_aware(datetime.combine(end_date, datetime_time.max))
+
+            # Configuration du type décimal
+            decimal_field = DecimalField(max_digits=12, decimal_places=2)
+            
+            utilisateurs = Utilisateur.objects.filter(
+                commandes__date_creation__range=(start_date, end_date)
+            ).annotate(
+                nb_commandes=Count('commandes', distinct=True),
+                total_ca=Coalesce(
+                    Sum(
+                        ExpressionWrapper(
+                            F('commandes__lignes__quantite') * 
+                            F('commandes__lignes__prix_unitaire') * 
+                            (1 - F('commandes__lignes__remise_ligne')/Value(100.0)),
+                            output_field=decimal_field
+                        )
+                    ),
+                    Value(0, output_field=decimal_field)
+                )
+            ).values(
+                'id', 'username', 'role', 'nb_commandes', 'total_ca'
+            ).order_by('-total_ca')
+
+            # Conversion des Decimal en float pour la réponse JSON
+            result = list(utilisateurs)
+            for item in result:
+                item['total_ca'] = float(item['total_ca'])
+
+            return Response({
+                "success": True,
+                "data": {
+                    "utilisateurs": result,
+                    "periode": {
+                        "debut": start_date.strftime('%Y-%m-%d'),
+                        "fin": end_date.strftime('%Y-%m-%d')
+                    }
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Erreur rapport utilisateurs: {str(e)}", exc_info=True)
+            return Response(
+                {
+                    "success": False,
+                    "error": "Erreur lors du calcul du rapport des utilisateurs",
+                    "details": str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

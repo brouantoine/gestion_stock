@@ -45,7 +45,23 @@ class Utilisateur(AbstractUser):
             ("reset_password", "Peut réinitialiser les mots de passe"),
             ("change_role", "Peut modifier les rôles"),
         ]
-
+    def get_nb_commandes(self, start_date, end_date):
+        return self.commandes.filter(
+            date_creation__range=(start_date, end_date)
+        ).count()
+    
+    def get_total_ca(self, start_date, end_date):
+        from django.db.models import Sum, F, DecimalField
+        from django.db.models.functions import Coalesce
+        
+        return self.commandes.filter(
+            date_creation__range=(start_date, end_date)
+        ).aggregate(
+            total=Coalesce(Sum(
+                F('lignes__quantite') * F('lignes__prix_unitaire') * (1 - F('lignes__remise_ligne')/100),
+                output_field=DecimalField(max_digits=12, decimal_places=2)
+            ), 0)
+        )['total']
 
 from django.db import models
 from django.core.validators import MinValueValidator
@@ -59,14 +75,13 @@ class Commande(models.Model):
         ('LIVREE', 'Livrée'),
         ('ANNULEE', 'Annulée'),
     ]
-    
+    utilisateur = models.ForeignKey('Utilisateur', on_delete=models.PROTECT, related_name='commandes')
     code_commande = models.CharField(max_length=20, unique=True, editable=False)
     fournisseur = models.ForeignKey('Fournisseur', on_delete=models.PROTECT, related_name='commandes')
     type_produit = models.CharField(max_length=50)
     date_creation = models.DateTimeField(auto_now_add=True)
     date_validation = models.DateTimeField(null=True, blank=True)
     statut = models.CharField(max_length=20, choices=STATUS_CHOICES, default='BROUILLON')
-    utilisateur = models.ForeignKey('Utilisateur', on_delete=models.PROTECT)
     notes = models.TextField(blank=True)
 
     def __str__(self):
@@ -113,9 +128,15 @@ class LigneCommande(models.Model):
     def __str__(self):
         return f"{self.quantite}x {self.produit.reference}"
 
-    @property
-    def total_ligne_ht(self):
-        return (self.quantite * self.prix_unitaire) * (1 - self.remise_ligne / 100)
+    total_ligne_ht = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        editable=False,
+        default=0
+    )
+    def save(self, *args, **kwargs):
+        self.total_ligne_ht = (self.quantite * self.prix_unitaire) * (1 - self.remise_ligne / 100)
+        super().save(*args, **kwargs)
 
 class Client(models.Model):
     nom_client = models.CharField(max_length=255)
