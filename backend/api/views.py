@@ -1001,20 +1001,39 @@ class RapportAPIView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     def _get_rapport_vendeurs(self, start_date, end_date, request):
-        """Génère le rapport performance vendeurs"""
+        """Version corrigée du rapport vendeurs"""
         try:
+            # Gestion des timezones pour les dates
+            if start_date and not timezone.is_aware(start_date):
+                start_date = timezone.make_aware(datetime.combine(start_date, datetime_time.min))
+            if end_date and not timezone.is_aware(end_date):
+                end_date = timezone.make_aware(datetime.combine(end_date, datetime_time.max))
+
             vendeurs = Utilisateur.objects.filter(
-                role='vendeur',
-                commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q(),
-                commande__statut='VALIDEE'
+                role='vendeur'
             ).annotate(
-                nb_ventes=Count('commande'),
-                total_ca=Sum('commande__total_commande'),
-                avg_vente=Avg('commande__total_commande')
+                nb_ventes=Count('commande', filter=Q(
+                    commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q(),
+                    commande__statut='VALIDEE'
+                )),
+                total_ca=Coalesce(Sum(
+                    'commande__total_ht',
+                    filter=Q(
+                        commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q(),
+                        commande__statut='VALIDEE'
+                    )
+                ), 0),
+                avg_vente=Coalesce(Avg(
+                    'commande__total_ht',
+                    filter=Q(
+                        commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q(),
+                        commande__statut='VALIDEE'
+                    )
+                ), 0)
             ).order_by('-total_ca').values(
                 'id', 'username', 'nb_ventes', 'total_ca', 'avg_vente'
             )
-            
+
             return Response({
                 "success": True,
                 "data": {
@@ -1025,13 +1044,14 @@ class RapportAPIView(APIView):
                     }
                 }
             })
-            
+
         except Exception as e:
             logger.error(f"Erreur rapport vendeurs: {str(e)}", exc_info=True)
             return Response(
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
     def _get_top_produits(self, start_date, end_date, limit=5):
         """Helper pour récupérer les produits les plus vendus"""
         queryset = LigneCommandeClient.objects.filter(
