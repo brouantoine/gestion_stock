@@ -6,6 +6,7 @@ from .views import (
     FournisseurViewSet, 
     ProduitViewSet, 
     ClientViewSet,
+    RapportAPIView,
     UserModulesView, 
     UtilisateurViewSet,
     CommandeClientViewSet,
@@ -19,7 +20,6 @@ from .views import (
     api_performance_vendeur,
     statistiques_commandes,  # Importez votre vue personnalisée
     user_activity,
-    rapport_activites
     
 )
 from django.urls import path
@@ -60,7 +60,7 @@ urlpatterns = [
     path("ws/barcode/", BarcodeConsumer.as_asgi()),
     path('produits/<int:pk>/can_delete/', ProduitViewSet.as_view({'get': 'can_delete'}), name='produit-can-delete'),
     path('produits/<int:pk>/mark_inactive/', ProduitViewSet.as_view({'patch': 'mark_inactive'}), name='produit-mark-inactive'),
-    path('rapports/activites/', rapport_activites, name='rapport-activites'),
+    path('rapports/', RapportAPIView.as_view(), name='rapports'),
 ]
 
 # urlpatterns = [

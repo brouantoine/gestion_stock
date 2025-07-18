@@ -275,3 +275,24 @@ class CommandeSerializer(serializers.ModelSerializer):
                 LigneCommande.objects.create(commande=instance, **ligne_data)
         
         return instance
+    
+    from rest_framework import serializers
+from .models import Produit
+
+class RapportProduitSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Produit
+        fields = [
+            'id', 'reference', 'designation', 'quantite_stock',
+            'seuil_alerte', 'prix_vente', 'est_actif'
+        ]
+from .models import CommandeClient
+
+class RapportCommandeSerializer(serializers.ModelSerializer):
+    client = serializers.CharField(source='client.nom', default='Direct')
+
+    class Meta:
+        model = CommandeClient
+        fields = [
+            'id', 'numero_commande', 'client', 'total_commande', 'statut', 'date_creation'
+        ]

@@ -1,159 +1,342 @@
-// src/pages/rapports/RapportActivites.jsx
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Tag, DatePicker, Select, Spin, Divider } from 'antd';
+import { 
+  Card, Table, Tag, DatePicker, Select, 
+  Spin, notification, Row, Col, Statistic, Button 
+} from 'antd';
 import { 
   AreaChart, Area, BarChart, Bar, 
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
+  XAxis, YAxis, CartesianGrid, Tooltip, 
+  Legend, ResponsiveContainer 
 } from 'recharts';
 import axios from 'axios';
 import moment from 'moment';
+import { DownloadOutlined } from '@ant-design/icons';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
 
-const Rapport = () => {
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState({});
+const RapportActivites = () => {
+  const [loading, setLoading] = useState(false);
+  const [reportData, setReportData] = useState([]);
   const [dateRange, setDateRange] = useState([
-    moment().subtract(30, 'days'),
+    moment().subtract(1, 'month'),
     moment()
   ]);
-  const [reportType, setReportType] = useState('global');
+  const [reportType, setReportType] = useState('ventes');
+  const [groupBy, setGroupBy] = useState('jour');
+  const [stats, setStats] = useState({
+    totalCA: 0,
+    totalTransactions: 0,
+    panierMoyen: 0
+  });
+
+  const safeNumber = (value, defaultValue = 0) => {
+    const num = Number(value);
+    return isNaN(num) ? defaultValue : num;
+  };
 
   const fetchReportData = async () => {
-    try {
-      setLoading(true);
-      const params = {
-        start_date: dateRange[0].format('YYYY-MM-DD'),
-        end_date: dateRange[1].format('YYYY-MM-DD')
-      };
+  try {
+    setLoading(true);
+    
+    const params = {
+      type: reportType,
+      debut: dateRange[0].format('YYYY-MM-DD'),
+      fin: dateRange[1].format('YYYY-MM-DD'),
+      group: reportType === 'ventes' ? groupBy : undefined
+    };
+
+    const { data } = await axios.get('/api/rapports/', { params });
+    
+    if (data?.success) {
+      // Normalisation des dates
+      const normalizedData = data.data?.map(item => ({
+        ...item,
+        date: item.date ? moment(item.date) : null,
+        total: safeNumber(item.total),
+        count: safeNumber(item.count, 1)
+      })) || [];
       
-      const response = await axios.get('/api/rapports/activites/', { params });
-      setData(response.data);
+      setReportData(normalizedData);
+      
+      // Calcul des stats pour les ventes
+      if (reportType === 'ventes') {
+        const totalCA = normalizedData.reduce((sum, item) => sum + safeNumber(item.total), 0);
+        const totalTransactions = normalizedData.reduce((sum, item) => sum + safeNumber(item.count), 0);
+        setStats({
+          totalCA,
+          totalTransactions,
+          panierMoyen: totalTransactions > 0 ? totalCA / totalTransactions : 0
+        });
+      }
+    } else {
+      notification.error({
+        message: 'Erreur',
+        description: data?.error || 'Erreur lors de la récupération des données'
+      });
+      setReportData([]);
+    }
+  } catch (error) {
+    console.error("Erreur:", error);
+    notification.error({
+      message: 'Erreur',
+      description: error.response?.data?.error || 'Impossible de charger le rapport'
+    });
+    setReportData([]);
+  } finally {
+    setLoading(false);
+  }
+};
+
+  const exportToPDF = async () => {
+    try {
+      const params = {
+        type: reportType,
+        debut: dateRange[0].format('YYYY-MM-DD'),
+        fin: dateRange[1].format('YYYY-MM-DD'),
+        group: reportType === 'ventes' ? groupBy : undefined
+      };
+
+      window.open(`/api/rapports/export-pdf/?${new URLSearchParams(params).toString()}`, '_blank');
     } catch (error) {
-      console.error('Erreur lors du chargement du rapport:', error);
-    } finally {
-      setLoading(false);
+      notification.error({
+        message: 'Erreur',
+        description: 'Impossible de générer le PDF'
+      });
     }
   };
 
   useEffect(() => {
     fetchReportData();
-  }, [dateRange, reportType]);
+  }, [reportType, dateRange, groupBy]);
 
-  const renderGlobalStats = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      <Card title="Chiffre d'affaires" bordered={false}>
-        <div className="text-2xl font-bold">
-          {data.global_stats?.total_ca?.toLocaleString('fr-FR')} €
-        </div>
-        <div className="text-sm text-gray-500">
-          sur {data.global_stats?.total_ventes} transactions
-        </div>
-      </Card>
+  const renderVentesReport = () => {
+    return (
+      <>
+        <Row gutter={16} className="mb-4">
+          <Col span={8}>
+            <Card>
+              <Statistic
+                title="Chiffre d'affaires total"
+                value={stats.totalCA.toFixed(2)}
+                precision={2}
+                suffix="€"
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card>
+              <Statistic
+                title="Nombre de transactions"
+                value={stats.totalTransactions}
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card>
+              <Statistic
+                title="Panier moyen"
+                value={stats.panierMoyen.toFixed(2)}
+                precision={2}
+                suffix="€"
+              />
+            </Card>
+          </Col>
+        </Row>
 
-      <Card title="Commandes clients" bordered={false}>
-        <div className="text-2xl font-bold">
-          {data.global_stats?.commandes_clients}
-        </div>
-        <div className="text-sm text-gray-500">
-          {data.global_stats?.ca_commandes?.toLocaleString('fr-FR')} €
-        </div>
-      </Card>
+        <Card 
+          title={`Chiffre d'affaires par ${groupBy}`} 
+          className="mb-4"
+          extra={
+            <Button 
+              icon={<DownloadOutlined />} 
+              onClick={exportToPDF}
+            >
+              Exporter
+            </Button>
+          }
+        >
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={reportData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis 
+                dataKey="date" 
+                tickFormatter={val => groupBy === 'jour' ? 
+                  moment(val).format('DD/MM') : 
+                  moment(val).format('MMM YYYY')}
+              />
+              <YAxis />
+              <Tooltip 
+                formatter={(value) => [`${safeNumber(value).toFixed(2)} €`, "CA"]}
+                labelFormatter={val => groupBy === 'jour' ?
+                  moment(val).format('DD/MM/YYYY') :
+                  moment(val).format('MMMM YYYY')}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="total" 
+                stroke="#8884d8" 
+                fill="#8884d8" 
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </Card>
 
-      <Card title="Ventes directes" bordered={false}>
-        <div className="text-2xl font-bold">
-          {data.global_stats?.ventes_directes}
-        </div>
-        <div className="text-sm text-gray-500">
-          {data.global_stats?.ca_ventes_directes?.toLocaleString('fr-FR')} €
-        </div>
-      </Card>
+        <Card title="Détail des ventes">
+          <Table
+            columns={[
+              {
+                title: groupBy === 'jour' ? 'Date' : 'Produit',
+                dataIndex: groupBy === 'jour' ? 'date' : 'produit__designation',
+                render: val => groupBy === 'jour' ? 
+                  moment(val).format('DD/MM/YYYY') : 
+                  val || 'N/A'
+              },
+              {
+                title: 'Montant',
+                dataIndex: 'total',
+                render: val => `${safeNumber(val).toFixed(2)} €`
+              },
+              {
+                title: 'Quantité',
+                dataIndex: 'count',
+                render: val => safeNumber(val),
+                hidden: groupBy !== 'jour'
+              },
+              {
+                title: 'Type',
+                dataIndex: 'is_vente_directe',
+                render: val => (
+                  <Tag color={val ? 'green' : 'blue'}>
+                    {val ? 'Vente directe' : 'Commande'}
+                  </Tag>
+                )
+              }
+            ].filter(col => !col.hidden)}
+            dataSource={reportData}
+            rowKey={groupBy === 'jour' ? 'date' : 'produit__reference'}
+            pagination={{ pageSize: 10 }}
+            locale={{ emptyText: 'Aucune donnée disponible' }}
+          />
+        </Card>
+      </>
+    );
+  };
 
-      <Card title="Moyenne quotidienne" bordered={false}>
-        <div className="text-2xl font-bold">
-          {(data.global_stats?.avg_ventes || 0).toFixed(1)}
-        </div>
-        <div className="text-sm text-gray-500">
-          ventes par jour
-        </div>
-      </Card>
-    </div>
-  );
-
-  const renderCharts = () => (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-      <Card title="Chiffre d'affaires par jour" bordered={false}>
-        <ResponsiveContainer width="100%" height={300}>
-          <AreaChart data={data.daily_stats}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" />
-            <YAxis />
-            <Tooltip formatter={(value) => [`${value} €`, 'CA']} />
-            <Area 
-              type="monotone" 
-              dataKey="ca_ht" 
-              stroke="#8884d8" 
-              fill="#8884d8" 
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </Card>
-
-      <Card title="Répartition des ventes" bordered={false}>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={data.daily_stats}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey="ventes_directes" name="Ventes directes" fill="#82ca9d" />
-            <Bar dataKey="commandes_clients" name="Commandes clients" fill="#8884d8" />
-          </BarChart>
-        </ResponsiveContainer>
-      </Card>
-    </div>
-  );
-
-  const renderRecentActivities = () => (
-    <Card title="Activités récentes" bordered={false}>
+  const renderStocksReport = () => (
+    <Card 
+      title="État des stocks"
+      extra={
+        <Button 
+          icon={<DownloadOutlined />} 
+          onClick={exportToPDF}
+        >
+          Exporter
+        </Button>
+      }
+    >
       <Table
         columns={[
-          { title: 'Date', dataIndex: 'date', key: 'date' },
-          { title: 'Utilisateur', dataIndex: 'user', key: 'user' },
-          { title: 'Action', dataIndex: 'action', key: 'action' },
-          { title: 'Détails', dataIndex: 'details', key: 'details' }
-        ]}
-        dataSource={data.recent_activities}
-        rowKey="id"
-        pagination={false}
-        size="small"
-      />
-    </Card>
-  );
-
-  const renderStockAlerts = () => (
-    <Card title="Alertes stock" bordered={false} className="mt-6">
-      <Table
-        columns={[
-          { title: 'Produit', dataIndex: 'produit', key: 'produit' },
-          { title: 'Stock actuel', dataIndex: 'stock', key: 'stock' },
-          { title: 'Seuil alerte', dataIndex: 'seuil', key: 'seuil' },
-          { 
-            title: 'Statut', 
+          {
+            title: 'Produit',
+            dataIndex: 'designation',
+            key: 'designation'
+          },
+          {
+            title: 'Référence',
+            dataIndex: 'reference',
+            key: 'reference'
+          },
+          {
+            title: 'Prix',
+            dataIndex: 'prix_vente',
+            key: 'prix',
+            render: val => `${safeNumber(val).toFixed(2)} €`
+          },
+          {
+            title: 'Stock',
+            dataIndex: 'quantite_stock',
+            key: 'stock'
+          },
+          {
+            title: 'Seuil alerte',
+            dataIndex: 'seuil_alerte',
+            key: 'seuil'
+          },
+          {
+            title: 'Statut',
+            dataIndex: 'status',
             key: 'status',
-            render: (_, record) => (
-              <Tag color={record.stock === 0 ? 'red' : 'orange'}>
-                {record.stock === 0 ? 'Rupture' : 'Alerte'}
+            render: status => (
+              <Tag color={status === 'rupture' ? 'red' : status === 'alerte' ? 'orange' : 'green'}>
+                {status === 'rupture' ? 'Rupture' : status === 'alerte' ? 'Alerte' : 'OK'}
               </Tag>
             )
           }
         ]}
-        dataSource={data.stock_alerts}
+        dataSource={reportData}
+        rowKey="reference"
+        pagination={{ pageSize: 10 }}
+        locale={{ emptyText: 'Aucune donnée disponible' }}
+      />
+    </Card>
+  );
+
+  const renderCommandesReport = () => (
+    <Card 
+      title="Commandes récentes"
+      extra={
+        <Button 
+          icon={<DownloadOutlined />} 
+          onClick={exportToPDF}
+        >
+          Exporter
+        </Button>
+      }
+    >
+      <Table
+        columns={[
+          {
+            title: 'N° Commande',
+            dataIndex: 'numero_commande',
+            key: 'numero'
+          },
+          {
+            title: 'Client',
+            dataIndex: 'client__nom_client',
+            key: 'client',
+            render: client => client || 'Vente directe'
+          },
+          {
+            title: 'Date',
+            dataIndex: 'date_creation',
+            key: 'date',
+            render: date => date ? moment(date).format('DD/MM/YYYY HH:mm') : 'N/A'
+          },
+          {
+            title: 'Montant',
+            dataIndex: 'total_commande',
+            key: 'total',
+            render: total => `${safeNumber(total).toFixed(2)} €`
+          },
+          {
+            title: 'Statut',
+            dataIndex: 'statut',
+            key: 'statut',
+            render: statut => (
+              <Tag color={
+                statut === 'VALIDEE' ? 'green' : 
+                statut === 'ANNULEE' ? 'red' : 'blue'
+              }>
+                {statut}
+              </Tag>
+            )
+          }
+        ]}
+        dataSource={reportData}
         rowKey="id"
-        pagination={false}
-        size="small"
+        pagination={{ pageSize: 10 }}
+        locale={{ emptyText: 'Aucune donnée disponible' }}
       />
     </Card>
   );
@@ -161,22 +344,40 @@ const Rapport = () => {
   return (
     <div className="p-4">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Rapport d'activités</h1>
+        <h1 className="text-2xl font-bold">
+          {`Rapport ${reportType === 'ventes' ? 'des ventes' : 
+            reportType === 'produits' ? 'du stock' : 
+            'des commandes'}`}
+        </h1>
+        
         <div className="flex space-x-4">
-          <RangePicker 
+          <RangePicker
             value={dateRange}
             onChange={setDateRange}
-            disabledDate={current => current && current > moment().endOf('day')}
+            format="DD/MM/YYYY"
+            disabledDate={current => current > moment().endOf('day')}
           />
+          
           <Select
             value={reportType}
             onChange={setReportType}
-            style={{ width: 200 }}
+            style={{ width: 150 }}
           >
-            <Option value="global">Vue globale</Option>
-            <Option value="ventes">Détail ventes</Option>
-            <Option value="stock">Statut stock</Option>
+            <Option value="ventes">Ventes</Option>
+            <Option value="produits">Stock</Option>
+            <Option value="commandes">Commandes</Option>
           </Select>
+          
+          {reportType === 'ventes' && (
+            <Select
+              value={groupBy}
+              onChange={setGroupBy}
+              style={{ width: 120 }}
+            >
+              <Option value="jour">Par jour</Option>
+              <Option value="produit">Par produit</Option>
+            </Select>
+          )}
         </div>
       </div>
 
@@ -186,48 +387,13 @@ const Rapport = () => {
         </div>
       ) : (
         <>
-          {reportType === 'global' && (
-            <>
-              {renderGlobalStats()}
-              {renderCharts()}
-              {renderRecentActivities()}
-            </>
-          )}
-
-          {reportType === 'stock' && renderStockAlerts()}
-
-          {reportType === 'ventes' && (
-            <Card title="Détail des ventes" bordered={false}>
-              <Table
-                columns={[
-                  { title: 'N° Commande', dataIndex: 'numero', key: 'numero' },
-                  { title: 'Client', dataIndex: 'client', key: 'client' },
-                  { title: 'Date', dataIndex: 'date', key: 'date' },
-                  { 
-                    title: 'Montant', 
-                    dataIndex: 'total', 
-                    key: 'total',
-                    render: value => `${value?.toLocaleString('fr-FR')} €`
-                  },
-                  { 
-                    title: 'Type', 
-                    key: 'type',
-                    render: (_, record) => (
-                      <Tag color={record.is_vente_directe ? 'green' : 'blue'}>
-                        {record.is_vente_directe ? 'Vente directe' : 'Commande'}
-                      </Tag>
-                    )
-                  }
-                ]}
-                dataSource={data.recent_commands}
-                rowKey="id"
-              />
-            </Card>
-          )}
+          {reportType === 'ventes' && renderVentesReport()}
+          {reportType === 'produits' && renderStocksReport()}
+          {reportType === 'commandes' && renderCommandesReport()}
         </>
       )}
     </div>
   );
 };
 
-export default Rapport;
+export default RapportActivites;

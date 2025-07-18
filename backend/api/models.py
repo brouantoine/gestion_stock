@@ -427,6 +427,12 @@ from django.db import models
 from django.core.validators import MinValueValidator
 
 class CommandeClient(models.Model):
+    date_creation = models.DateTimeField()
+
+    def save(self, *args, **kwargs):
+        print("DATE CREATION AVANT ENREGISTREMENT :", self.date_creation)
+        super().save(*args, **kwargs)
+
     STATUT_CHOICES = [
         ('BROUILLON', 'Brouillon (panier non validé)'),
         ('VALIDEE', 'Validée par le client'),
@@ -449,7 +455,7 @@ class CommandeClient(models.Model):
     # Logistique
     mode_retrait = models.CharField(max_length=10, choices=MODE_RETRAIT, default='MAGASIN')
     adresse_livraison = models.TextField(blank=True)  # Si livraison
-    date_creation = models.DateTimeField(auto_now_add=True)
+    date_creation = models.DateTimeField(auto_now_add=True, verbose_name="Date de création")
     date_livraison_prevue = models.DateTimeField(null=True, blank=True)
     date_livraison_reelle = models.DateTimeField(null=True, blank=True)
     is_vente_directe = models.BooleanField(default=False)
@@ -510,7 +516,9 @@ class LigneCommandeClient(models.Model):
     remise_ligne = models.DecimalField(max_digits=5, decimal_places=2, default=0)  # Remise en % par produit
 
     def __str__(self):
-        return f"{self.quantite}x {self.produit.designation}"
+        produit_designation = self.produit.designation if self.produit else "Produit supprimé"
+        return f"{self.quantite}x {produit_designation}"
+
 
     @property
     def sous_total_ht(self):

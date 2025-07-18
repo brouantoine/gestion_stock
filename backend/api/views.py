@@ -1,5 +1,6 @@
 # api/views.py
-
+from urllib import request
+from django.db import models
 from warnings import filters
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
@@ -7,6 +8,7 @@ from rest_framework.response import Response
 import datetime
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+from sympy import Max
 from api.models import Produit
 from api.serializers import ProduitSerializer
 from api.models import Produit
@@ -672,98 +674,374 @@ class CommandeViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(statut=statut)
             
         return queryset.order_by('-date_creation')
-
-# api/views.py
-from django.db.models import Count, Sum, Q
-from django.utils import timezone
-from datetime import timedelta
-from rest_framework.decorators import api_view
+        
+from django.db.models import ExpressionWrapper, FloatField
+from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework import status
+from django.db.models import Sum, Count, F, Q, Avg, Max
+from django.db.models.functions import TruncDay, TruncMonth
+from django.utils import timezone
+from datetime import datetime, timedelta
+import logging
 from .models import (
-    CommandeClient, Vente, MouvementStock, 
-    Produit, ActivityLog, Utilisateur
+    CommandeClient,
+    LigneCommandeClient,
+    Produit,
+    Fournisseur,
+    Client,
+    MouvementStock,
+    Statistique,
+    Utilisateur
 )
 
-@api_view(['GET'])
-def rapport_activites(request):
-    try:
-        # Paramètres de période (par défaut: 30 derniers jours)
-        days = int(request.GET.get('days', 30))
-        end_date = timezone.now().date()
-        start_date = end_date - timedelta(days=days)
+logger = logging.getLogger(__name__)
+
+class RapportAPIView(APIView):
+    """
+    Vue API complète pour générer différents types de rapports
+    """
+
+    def get(self, request):
+        report_type = request.query_params.get('type', 'ventes')
+        start_date = request.query_params.get('debut')
+        end_date = request.query_params.get('fin')
         
-        # 1. Statistiques globales
-        ventes = CommandeClient.objects.filter(
-            date_creation__date__gte=start_date,
-            date_creation__date__lte=end_date,
-            statut__in=['VALIDEE', 'LIVREE']
+        try:
+            # Validation des dates
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else None
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date() if end_date else None
+            
+            if start_date and end_date and start_date > end_date:
+                raise ValueError("La date de début doit être antérieure à la date de fin")
+
+        except ValueError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Dispatch vers le bon handler
+        handlers = {
+            'ventes': self._get_rapport_ventes,
+            'produits': self._get_rapport_produits,
+            'clients': self._get_rapport_clients,
+            'fournisseurs': self._get_rapport_fournisseurs,
+            'vendeurs': self._get_rapport_vendeurs,
+            'statistiques_commandes': self.statistiques_commandes
+        }
+        
+        if report_type not in handlers:
+            return Response(
+                {"error": "Type de rapport non supporté"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        return handlers[report_type](start_date, end_date, request)
+
+    def statistiques_commandes(self, start_date, end_date, request):
+        """Génère les statistiques des commandes"""
+        try:
+            # Paramètres de période (par défaut: 30 derniers jours)
+            days = int(request.GET.get('days', 30))
+            end_date = timezone.now().date()
+            start_date = end_date - timedelta(days=days)
+            
+            # Récupération des stats
+            stats_queryset = Statistique.objects.filter(
+                date__gte=start_date,
+                date__lte=end_date
+            ).order_by('date')
+            
+            # Calculs manuels des totaux
+            total_data = {
+                'total_ca': sum(s.montant_total for s in stats_queryset),
+                'total_ventes': sum(s.nb_ventes for s in stats_queryset),
+                'ventes_directes': sum(s.nb_ventes_directes for s in stats_queryset),
+                'commandes_clients': sum(s.nb_commandes_clients for s in stats_queryset),
+                'ca_ventes_directes': sum(s.montant_ventes_directes for s in stats_queryset),
+                'ca_commandes': sum(s.montant_commandes for s in stats_queryset),
+                'avg_ventes': sum(s.nb_ventes for s in stats_queryset) / days if days > 0 else 0
+            }
+            
+            # Détails quotidiens
+            daily_stats = [
+                {
+                    'date': s.date.strftime('%Y-%m-%d'),
+                    'ca_ht': float(s.montant_total),
+                    'ventes': s.nb_ventes,
+                    'ventes_directes': s.nb_ventes_directes,
+                    'commandes_clients': s.nb_commandes_clients
+                } for s in stats_queryset
+            ]
+            
+            # Commandes récentes
+            recent_commands = CommandeClient.objects.filter(
+                date_creation__gte=start_date,
+                statut='VALIDEE'
+            ).order_by('-date_creation')[:10]
+            
+            return Response({
+                'success': True,
+                'data': {
+                    'periode': {
+                        'debut': start_date.strftime('%Y-%m-%d'),
+                        'fin': end_date.strftime('%Y-%m-%d')
+                    },
+                    'stats_globales': total_data,
+                    'stats_quotidiennes': daily_stats,
+                    'commandes_recentes': [
+                        {
+                            'id': cmd.id,
+                            'numero': cmd.numero_commande,
+                            'client': cmd.client.nom_client if cmd.client else 'Direct',
+                            'total': float(cmd.total_commande) if cmd.total_commande else 0,
+                            'date': cmd.date_creation.strftime('%Y-%m-%d %H:%M'),
+                            'is_vente_directe': cmd.client is None or str(cmd.client.id) == '3'
+                        } for cmd in recent_commands
+                    ]
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Erreur statistiques_commandes: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'error': str(e),
+                'message': 'Erreur lors du calcul des statistiques'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _get_rapport_ventes(self, start_date, end_date, request):
+        """Version corrigée pour afficher toutes les commandes"""
+        try:
+            # Si aucune date n'est spécifiée, on prend les 30 derniers jours
+            if not start_date or not end_date:
+                days = 30
+                end_date = timezone.now().date()
+                start_date = end_date - timedelta(days=days)
+            
+            # Récupération des stats
+            stats_queryset = Statistique.objects.filter(
+                date__gte=start_date,
+                date__lte=end_date
+            ).order_by('date')
+            
+            # Calculs des totaux
+            total_data = {
+                'total_ca': sum(s.montant_total for s in stats_queryset),
+                'total_ventes': sum(s.nb_ventes for s in stats_queryset),
+                'ventes_directes': sum(s.nb_ventes_directes for s in stats_queryset),
+                'commandes_clients': sum(s.nb_commandes_clients for s in stats_queryset),
+                'ca_ventes_directes': sum(s.montant_ventes_directes for s in stats_queryset),
+                'ca_commandes': sum(s.montant_commandes for s in stats_queryset),
+                'avg_ventes': sum(s.nb_ventes for s in stats_queryset) / (end_date - start_date).days if start_date != end_date else 0
+            }
+            
+            # Détails quotidiens
+            daily_stats = [
+                {
+                    'date': s.date.strftime('%Y-%m-%d'),
+                    'ca_ht': float(s.montant_total),
+                    'ventes': s.nb_ventes,
+                    'ventes_directes': s.nb_ventes_directes,
+                    'commandes_clients': s.nb_commandes_clients
+                } for s in stats_queryset
+            ]
+            
+            # Commandes récentes - FILTRE CORRIGÉ ICI
+            recent_commands = CommandeClient.objects.filter(
+                date_creation__date__gte=start_date,
+                date_creation__date__lte=end_date
+            ).order_by('-date_creation')[:10]
+            
+            # Top produits
+            top_produits = LigneCommandeClient.objects.filter(
+                commande__date_creation__date__gte=start_date,
+                commande__date_creation__date__lte=end_date
+            ).values(
+                'produit__id', 'produit__designation'
+            ).annotate(
+                quantite_vendue=Sum('quantite'),
+                total_ca=Sum(F('quantite') * F('prix_unitaire'))
+            ).order_by('-total_ca')[:10]
+
+            return Response({
+                "success": True,
+                "data": {
+                    "periode": {
+                        "debut": start_date.strftime('%Y-%m-%d'),
+                        "fin": end_date.strftime('%Y-%m-%d')
+                    },
+                    "stats_globales": total_data,
+                    "stats_quotidiennes": daily_stats,
+                    "top_produits": list(top_produits),
+                    "commandes_recentes": [
+                        {
+                            'id': cmd.id,
+                            'numero': cmd.numero_commande,
+                            'client': cmd.client.nom_client if cmd.client else 'Client Direct',
+                            'total': float(cmd.total_commande) if cmd.total_commande else 0,
+                            'date': cmd.date_creation.strftime('%Y-%m-%d %H:%M'),
+                            'is_vente_directe': cmd.client is None or str(getattr(cmd.client, 'id', '')) == '3'
+                        } for cmd in recent_commands
+                    ]
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Erreur rapport ventes: {str(e)}", exc_info=True)
+            return Response({
+                "success": False,
+                "error": str(e),
+                "message": "Erreur lors du calcul des statistiques"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _get_rapport_produits(self, start_date, end_date, request):
+        """Génère le rapport des produits/stock"""
+        try:
+            # Produits en rupture
+            produits_rupture = Produit.objects.filter(
+                quantite_stock__lte=F('seuil_alerte')
+            ).values('id', 'designation', 'quantite_stock', 'seuil_alerte')
+            
+            # Top produits
+            top_produits = self._get_top_produits(start_date, end_date)
+            
+            # Mouvements de stock
+            mouvements = MouvementStock.objects.filter(
+                date_mouvement__date__range=[start_date, end_date] if start_date and end_date else Q()
+            ).values('type_mouvement').annotate(
+                total=Sum('quantite')
+            )
+            
+            return Response({
+                "success": True,
+                "data": {
+                    "produits_rupture": list(produits_rupture),
+                    "top_produits": list(top_produits),
+                    "mouvements_stock": list(mouvements),
+                    "periode": {
+                        "debut": start_date.strftime('%Y-%m-%d') if start_date else None,
+                        "fin": end_date.strftime('%Y-%m-%d') if end_date else None
+                    }
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Erreur rapport produits: {str(e)}", exc_info=True)
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def _get_rapport_clients(self, start_date, end_date, request):
+        """Génère le rapport clients"""
+        try:
+            # Clients actifs
+            clients_actifs = Client.objects.filter(
+                commandes__date_creation__range=[start_date, end_date] if start_date and end_date else Q()
+            ).annotate(
+                total_commandes=Count('commandes'),
+                total_ca=Sum('commandes__total_commande')
+            ).order_by('-total_ca').values(
+                'id', 'nom_client', 'email', 'total_commandes', 'total_ca'
+            )[:10]
+            
+            # Répartition géographique
+            repartition_geo = Client.objects.values(
+                'ville', 'pays'
+            ).annotate(
+                count=Count('id')
+            ).order_by('-count')
+            
+            return Response({
+                "success": True,
+                "data": {
+                    "clients_actifs": list(clients_actifs),
+                    "repartition_geo": list(repartition_geo),
+                    "periode": {
+                        "debut": start_date.strftime('%Y-%m-%d') if start_date else None,
+                        "fin": end_date.strftime('%Y-%m-%d') if end_date else None
+                    }
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Erreur rapport clients: {str(e)}", exc_info=True)
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def _get_rapport_fournisseurs(self, start_date, end_date, request):
+        """Génère le rapport fournisseurs"""
+        try:
+            fournisseurs = Fournisseur.objects.annotate(
+                nb_commandes=Count('commandes'),
+                dernier_appro=Max('commandes__date_creation')
+            ).order_by('-nb_commandes').values(
+                'id', 'nom_fournisseur', 'email', 'telephone', 'nb_commandes', 'dernier_appro'
+            )
+            
+            return Response({
+                "success": True,
+                "data": {
+                    "fournisseurs": list(fournisseurs),
+                    "periode": {
+                        "debut": start_date.strftime('%Y-%m-%d') if start_date else None,
+                        "fin": end_date.strftime('%Y-%m-%d') if end_date else None
+                    }
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Erreur rapport fournisseurs: {str(e)}", exc_info=True)
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    def _get_rapport_vendeurs(self, start_date, end_date, request):
+        """Génère le rapport performance vendeurs"""
+        try:
+            vendeurs = Utilisateur.objects.filter(
+                role='vendeur',
+                commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q(),
+                commande__statut='VALIDEE'
+            ).annotate(
+                nb_ventes=Count('commande'),
+                total_ca=Sum('commande__total_commande'),
+                avg_vente=Avg('commande__total_commande')
+            ).order_by('-total_ca').values(
+                'id', 'username', 'nb_ventes', 'total_ca', 'avg_vente'
+            )
+            
+            return Response({
+                "success": True,
+                "data": {
+                    "vendeurs": list(vendeurs),
+                    "periode": {
+                        "debut": start_date.strftime('%Y-%m-%d') if start_date else None,
+                        "fin": end_date.strftime('%Y-%m-%d') if end_date else None
+                    }
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Erreur rapport vendeurs: {str(e)}", exc_info=True)
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    def _get_top_produits(self, start_date, end_date, limit=5):
+        """Helper pour récupérer les produits les plus vendus"""
+        queryset = LigneCommandeClient.objects.filter(
+            commande__statut='VALIDEE',
+            commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q()
         )
         
-        total_ventes = ventes.count()
-        ventes_directes = ventes.filter(Q(client__isnull=True) | Q(client__is_direct=True)).count()
-        commandes_clients = total_ventes - ventes_directes
-        
-        ca_total = ventes.aggregate(total=Sum('total_commande'))['total'] or 0
-        ca_direct = ventes.filter(Q(client__isnull=True) | Q(client__is_direct=True)) \
-                         .aggregate(total=Sum('total_commande'))['total'] or 0
-        ca_commandes = ca_total - ca_direct
-        
-        # 2. Statistiques par jour
-        daily_stats = []
-        current_date = start_date
-        while current_date <= end_date:
-            day_ventes = ventes.filter(date_creation__date=current_date)
-            day_direct = day_ventes.filter(Q(client__isnull=True) | Q(client__is_direct=True))
-            
-            daily_stats.append({
-                'date': current_date.strftime('%Y-%m-%d'),
-                'ca_ht': float(day_ventes.aggregate(total=Sum('total_commande'))['total'] or 0),
-                'ventes': day_ventes.count(),
-                'ventes_directes': day_direct.count(),
-                'commandes_clients': day_ventes.count() - day_direct.count()
-            })
-            current_date += timedelta(days=1)
-        
-        # 3. Activités récentes
-        recent_activities = ActivityLog.objects \
-            .select_related('user') \
-            .order_by('-timestamp')[:20] \
-            .values('id', 'action', 'details', 'timestamp', 'user__username')
-        
-        # 4. Alertes stock
-        stock_alerts = Produit.objects.filter(
-            Q(quantite_stock=0) | 
-            Q(quantite_stock__lte=F('seuil_alerte'))
-        ).values('id', 'designation', 'quantite_stock', 'seuil_alerte')
-        
-        # 5. Commandes récentes
-        recent_commands = CommandeClient.objects \
-            .select_related('client') \
-            .filter(date_creation__gte=start_date) \
-            .order_by('-date_creation')[:10] \
-            .values(
-                'id', 'numero_commande', 'total_commande',
-                'date_creation', 'client__nom_client',
-                is_vente_directe=Q(client__isnull=True) | Q(client__is_direct=True))
-        
-        return Response({
-            'global_stats': {
-                'total_ca': float(ca_total),
-                'total_ventes': total_ventes,
-                'ventes_directes': ventes_directes,
-                'commandes_clients': commandes_clients,
-                'ca_ventes_directes': float(ca_direct),
-                'ca_commandes': float(ca_commandes),
-                'avg_ventes': total_ventes / days if days > 0 else 0
-            },
-            'daily_stats': daily_stats,
-            'recent_activities': recent_activities,
-            'stock_alerts': stock_alerts,
-            'recent_commands': recent_commands
-        })
-
-    except Exception as e:
-        return Response({
-            'error': str(e),
-            'message': 'Erreur lors de la génération du rapport'
-        }, status=500)
+        return queryset.values(
+            'produit__id', 'produit__designation'
+        ).annotate(
+            total_ventes=Sum('quantite'),
+            total_ca=Sum(F('quantite') * F('prix_unitaire'), output_field=FloatField())
+        ).order_by('-total_ca')[:limit]
