@@ -10,20 +10,25 @@ const CommandesList = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchCommandes = async () => {
-      try {
-        const response = await ApiService.commandes.getAll();
-        setCommandes(response.data);
-      } catch (err) {
-        setError(err.message || 'Erreur lors du chargement des commandes');
-        console.error('Erreur API:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchCommandes = async () => {
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await ApiService.commandes.getAll({
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      setCommandes(response.data);
+    } catch (err) {
+      setError(err.message || 'Erreur lors du chargement des commandes');
+      console.error('Erreur API:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    fetchCommandes();
-  }, []);
+  fetchCommandes();
+}, []);
 
   const handleRowClick = (commandeId) => {
     navigate(`/commandes/${commandeId}`);

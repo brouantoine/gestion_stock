@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Card, Table, Tag, DatePicker, Select, 
-  Spin, notification, Row, Col, Statistic, Button 
+  Spin, notification, Row, Col, Statistic, 
+  Button, Typography, Divider, Collapse, Empty 
 } from 'antd';
 import { 
-  AreaChart, Area, BarChart, Bar, 
-  XAxis, YAxis, CartesianGrid, Tooltip, 
-  Legend, ResponsiveContainer 
+  BarChart, Bar, XAxis, YAxis, 
+  CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
 import axios from 'axios';
 import moment from 'moment';
@@ -14,341 +14,290 @@ import { DownloadOutlined } from '@ant-design/icons';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
+const { Title, Text } = Typography;
+const { Panel } = Collapse;
 
-const RapportActivites = () => {
+// Removed TypeScript type alias, use plain JS
+
+const DashboardRapports = () => {
   const [loading, setLoading] = useState(false);
-  const [reportData, setReportData] = useState([]);
   const [dateRange, setDateRange] = useState([
     moment().subtract(1, 'month'),
     moment()
   ]);
-  const [reportType, setReportType] = useState('ventes');
-  const [groupBy, setGroupBy] = useState('jour');
-  const [stats, setStats] = useState({
-    totalCA: 0,
-    totalTransactions: 0,
-    panierMoyen: 0
-  });
+  const [reportType, setReportType] = useState('statistiques_commandes');
+  const [data, setData] = useState({});
+  const [activePanels, setActivePanels] = useState(['1', '2']);
 
-  const safeNumber = (value, defaultValue = 0) => {
-    const num = Number(value);
-    return isNaN(num) ? defaultValue : num;
-  };
-
-  const fetchReportData = async () => {
-  try {
-    setLoading(true);
-    
-    const params = {
-      type: reportType,
-      debut: dateRange[0].format('YYYY-MM-DD'),
-      fin: dateRange[1].format('YYYY-MM-DD'),
-      group: reportType === 'ventes' ? groupBy : undefined
-    };
-
-    const { data } = await axios.get('/api/rapports/', { params });
-    
-    if (data?.success) {
-      // Normalisation des dates
-      const normalizedData = data.data?.map(item => ({
-        ...item,
-        date: item.date ? moment(item.date) : null,
-        total: safeNumber(item.total),
-        count: safeNumber(item.count, 1)
-      })) || [];
-      
-      setReportData(normalizedData);
-      
-      // Calcul des stats pour les ventes
-      if (reportType === 'ventes') {
-        const totalCA = normalizedData.reduce((sum, item) => sum + safeNumber(item.total), 0);
-        const totalTransactions = normalizedData.reduce((sum, item) => sum + safeNumber(item.count), 0);
-        setStats({
-          totalCA,
-          totalTransactions,
-          panierMoyen: totalTransactions > 0 ? totalCA / totalTransactions : 0
-        });
-      }
-    } else {
-      notification.error({
-        message: 'Erreur',
-        description: data?.error || 'Erreur lors de la récupération des données'
-      });
-      setReportData([]);
-    }
-  } catch (error) {
-    console.error("Erreur:", error);
-    notification.error({
-      message: 'Erreur',
-      description: error.response?.data?.error || 'Impossible de charger le rapport'
-    });
-    setReportData([]);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  const exportToPDF = async () => {
+  const fetchData = async () => {
     try {
+      setLoading(true);
+      const token = localStorage.getItem('access_token');
+      
       const params = {
         type: reportType,
         debut: dateRange[0].format('YYYY-MM-DD'),
         fin: dateRange[1].format('YYYY-MM-DD'),
-        group: reportType === 'ventes' ? groupBy : undefined
+        group: 'jour'
       };
 
-      window.open(`/api/rapports/export-pdf/?${new URLSearchParams(params).toString()}`, '_blank');
+      const response = await axios.get('/api/rapports/', {
+        params,
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (response.data?.success) {
+        setData(response.data.data);
+      } else {
+        notification.error({
+          message: 'Erreur',
+          description: 'Erreur lors de la récupération des données'
+        });
+      }
     } catch (error) {
+      console.error("Erreur:", error);
       notification.error({
         message: 'Erreur',
-        description: 'Impossible de générer le PDF'
+        description: error.response?.data?.error || 'Impossible de charger les données'
       });
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchReportData();
-  }, [reportType, dateRange, groupBy]);
+    fetchData();
+  }, [reportType, dateRange]);
 
-  const renderVentesReport = () => {
+  const renderStatsGlobales = () => {
+    if (!data.stats_globales) return null;
+    
+    const stats = data.stats_globales;
     return (
-      <>
-        <Row gutter={16} className="mb-4">
-          <Col span={8}>
-            <Card>
-              <Statistic
-                title="Chiffre d'affaires total"
-                value={stats.totalCA.toFixed(2)}
-                precision={2}
-                suffix="€"
-              />
-            </Card>
-          </Col>
-          <Col span={8}>
-            <Card>
-              <Statistic
-                title="Nombre de transactions"
-                value={stats.totalTransactions}
-              />
-            </Card>
-          </Col>
-          <Col span={8}>
-            <Card>
-              <Statistic
-                title="Panier moyen"
-                value={stats.panierMoyen.toFixed(2)}
-                precision={2}
-                suffix="€"
-              />
-            </Card>
-          </Col>
-        </Row>
-
-        <Card 
-          title={`Chiffre d'affaires par ${groupBy}`} 
-          className="mb-4"
-          extra={
-            <Button 
-              icon={<DownloadOutlined />} 
-              onClick={exportToPDF}
-            >
-              Exporter
-            </Button>
-          }
-        >
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={reportData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis 
-                dataKey="date" 
-                tickFormatter={val => groupBy === 'jour' ? 
-                  moment(val).format('DD/MM') : 
-                  moment(val).format('MMM YYYY')}
-              />
-              <YAxis />
-              <Tooltip 
-                formatter={(value) => [`${safeNumber(value).toFixed(2)} €`, "CA"]}
-                labelFormatter={val => groupBy === 'jour' ?
-                  moment(val).format('DD/MM/YYYY') :
-                  moment(val).format('MMMM YYYY')}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="total" 
-                stroke="#8884d8" 
-                fill="#8884d8" 
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </Card>
-
-        <Card title="Détail des ventes">
-          <Table
-            columns={[
-              {
-                title: groupBy === 'jour' ? 'Date' : 'Produit',
-                dataIndex: groupBy === 'jour' ? 'date' : 'produit__designation',
-                render: val => groupBy === 'jour' ? 
-                  moment(val).format('DD/MM/YYYY') : 
-                  val || 'N/A'
-              },
-              {
-                title: 'Montant',
-                dataIndex: 'total',
-                render: val => `${safeNumber(val).toFixed(2)} €`
-              },
-              {
-                title: 'Quantité',
-                dataIndex: 'count',
-                render: val => safeNumber(val),
-                hidden: groupBy !== 'jour'
-              },
-              {
-                title: 'Type',
-                dataIndex: 'is_vente_directe',
-                render: val => (
-                  <Tag color={val ? 'green' : 'blue'}>
-                    {val ? 'Vente directe' : 'Commande'}
-                  </Tag>
-                )
-              }
-            ].filter(col => !col.hidden)}
-            dataSource={reportData}
-            rowKey={groupBy === 'jour' ? 'date' : 'produit__reference'}
-            pagination={{ pageSize: 10 }}
-            locale={{ emptyText: 'Aucune donnée disponible' }}
-          />
-        </Card>
-      </>
+      <Row gutter={16} className="mb-4">
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="Chiffre d'affaires total"
+              value={stats.total_ca}
+              precision={2}
+              suffix="€"
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="Total ventes"
+              value={stats.total_ventes}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="Ventes directes"
+              value={stats.ventes_directes}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="Commandes clients"
+              value={stats.commandes_clients}
+            />
+          </Card>
+        </Col>
+      </Row>
     );
   };
 
-  const renderStocksReport = () => (
-    <Card 
-      title="État des stocks"
-      extra={
-        <Button 
-          icon={<DownloadOutlined />} 
-          onClick={exportToPDF}
-        >
-          Exporter
-        </Button>
-      }
-    >
-      <Table
-        columns={[
-          {
-            title: 'Produit',
-            dataIndex: 'designation',
-            key: 'designation'
-          },
-          {
-            title: 'Référence',
-            dataIndex: 'reference',
-            key: 'reference'
-          },
-          {
-            title: 'Prix',
-            dataIndex: 'prix_vente',
-            key: 'prix',
-            render: val => `${safeNumber(val).toFixed(2)} €`
-          },
-          {
-            title: 'Stock',
-            dataIndex: 'quantite_stock',
-            key: 'stock'
-          },
-          {
-            title: 'Seuil alerte',
-            dataIndex: 'seuil_alerte',
-            key: 'seuil'
-          },
-          {
-            title: 'Statut',
-            dataIndex: 'status',
-            key: 'status',
-            render: status => (
-              <Tag color={status === 'rupture' ? 'red' : status === 'alerte' ? 'orange' : 'green'}>
-                {status === 'rupture' ? 'Rupture' : status === 'alerte' ? 'Alerte' : 'OK'}
-              </Tag>
-            )
-          }
-        ]}
-        dataSource={reportData}
-        rowKey="reference"
-        pagination={{ pageSize: 10 }}
-        locale={{ emptyText: 'Aucune donnée disponible' }}
-      />
-    </Card>
-  );
-
-  const renderCommandesReport = () => (
-    <Card 
-      title="Commandes récentes"
-      extra={
-        <Button 
-          icon={<DownloadOutlined />} 
-          onClick={exportToPDF}
-        >
-          Exporter
-        </Button>
-      }
-    >
+  const renderCommandesRecentes = () => {
+    if (!data.commandes_recentes?.length) return <Empty />;
+    
+    return (
       <Table
         columns={[
           {
             title: 'N° Commande',
-            dataIndex: 'numero_commande',
+            dataIndex: 'numero',
             key: 'numero'
           },
           {
             title: 'Client',
-            dataIndex: 'client__nom_client',
-            key: 'client',
-            render: client => client || 'Vente directe'
+            dataIndex: 'client',
+            key: 'client'
           },
           {
             title: 'Date',
-            dataIndex: 'date_creation',
+            dataIndex: 'date',
             key: 'date',
-            render: date => date ? moment(date).format('DD/MM/YYYY HH:mm') : 'N/A'
+            render: date => moment(date).format('DD/MM/YYYY HH:mm')
           },
           {
             title: 'Montant',
-            dataIndex: 'total_commande',
+            dataIndex: 'total',
             key: 'total',
-            render: total => `${safeNumber(total).toFixed(2)} €`
+            render: total => `${parseFloat(total).toFixed(2)} €`
           },
           {
-            title: 'Statut',
-            dataIndex: 'statut',
-            key: 'statut',
-            render: statut => (
-              <Tag color={
-                statut === 'VALIDEE' ? 'green' : 
-                statut === 'ANNULEE' ? 'red' : 'blue'
-              }>
-                {statut}
+            title: 'Type',
+            dataIndex: 'is_vente_directe',
+            key: 'type',
+            render: isDirect => (
+              <Tag color={isDirect ? 'green' : 'blue'}>
+                {isDirect ? 'Vente directe' : 'Commande'}
               </Tag>
             )
           }
         ]}
-        dataSource={reportData}
+        dataSource={data.commandes_recentes}
         rowKey="id"
-        pagination={{ pageSize: 10 }}
-        locale={{ emptyText: 'Aucune donnée disponible' }}
+        pagination={{ pageSize: 5 }}
+        size="small"
       />
-    </Card>
-  );
+    );
+  };
+
+  const renderTopProduits = () => {
+    if (!data.top_produits?.length) return <Empty />;
+    
+    return (
+      <Table
+        columns={[
+          {
+            title: 'Produit',
+            dataIndex: 'produit__designation',
+            key: 'produit'
+          },
+          {
+            title: 'Quantité vendue',
+            dataIndex: 'quantite_vendue',
+            key: 'quantite'
+          },
+          {
+            title: 'CA généré',
+            dataIndex: 'total_ca',
+            key: 'ca',
+            render: ca => `${parseFloat(ca).toFixed(2)} €`
+          }
+        ]}
+        dataSource={data.top_produits}
+        rowKey="produit__id"
+        pagination={false}
+        size="small"
+      />
+    );
+  };
+
+  const renderClientsActifs = () => {
+    if (!data.clients_actifs?.length) return <Empty />;
+    
+    return (
+      <Table
+        columns={[
+          {
+            title: 'Client',
+            dataIndex: 'nom_client',
+            key: 'client'
+          },
+          {
+            title: 'Commandes',
+            dataIndex: 'total_commandes',
+            key: 'commandes'
+          },
+          {
+            title: 'CA généré',
+            dataIndex: 'total_ca',
+            key: 'ca',
+            render: ca => `${parseFloat(ca).toFixed(2)} €`
+          }
+        ]}
+        dataSource={data.clients_actifs}
+        rowKey="id"
+        pagination={false}
+        size="small"
+      />
+    );
+  };
+
+  const renderFournisseurs = () => {
+    if (!data.fournisseurs?.length) return <Empty />;
+    
+    return (
+      <Table
+        columns={[
+          {
+            title: 'Fournisseur',
+            dataIndex: 'nom_fournisseur',
+            key: 'fournisseur'
+          },
+          {
+            title: 'Commandes',
+            dataIndex: 'nb_commandes',
+            key: 'commandes'
+          },
+          {
+            title: 'Dernier appro',
+            dataIndex: 'dernier_appro',
+            key: 'appro',
+            render: date => moment(date).format('DD/MM/YYYY')
+          }
+        ]}
+        dataSource={data.fournisseurs}
+        rowKey="id"
+        pagination={false}
+        size="small"
+      />
+    );
+  };
+
+  const renderUtilisateurs = () => {
+    if (!data.utilisateurs?.length) return <Empty />;
+    
+    return (
+      <Table
+        columns={[
+          {
+            title: 'Utilisateur',
+            dataIndex: 'username',
+            key: 'user'
+          },
+          {
+            title: 'Rôle',
+            dataIndex: 'role',
+            key: 'role'
+          },
+          {
+            title: 'CA total',
+            dataIndex: 'Chiffre d\'affaires total',
+            key: 'ca',
+            render: ca => `${parseFloat(ca).toFixed(2)} €`
+          }
+        ]}
+        dataSource={data.utilisateurs}
+        rowKey="id"
+        pagination={false}
+        size="small"
+        expandable={{
+          expandedRowRender: record => (
+            <div style={{ margin: 0 }}>
+              <p><strong>Commandes fournisseurs:</strong> {record['Commandes fournisseurs'].nombre}</p>
+              <p><strong>Ventes directes:</strong> {record['Ventes directes effectuées'].nombre}</p>
+            </div>
+          )
+        }}
+      />
+    );
+  };
 
   return (
     <div className="p-4">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">
-          {`Rapport ${reportType === 'ventes' ? 'des ventes' : 
-            reportType === 'produits' ? 'du stock' : 
-            'des commandes'}`}
-        </h1>
+        <Title level={3}>Tableau de bord analytique</Title>
         
         <div className="flex space-x-4">
           <RangePicker
@@ -361,23 +310,15 @@ const RapportActivites = () => {
           <Select
             value={reportType}
             onChange={setReportType}
-            style={{ width: 150 }}
+            style={{ width: 200 }}
           >
-            <Option value="ventes">Ventes</Option>
-            <Option value="produits">Stock</Option>
-            <Option value="commandes">Commandes</Option>
+            <Option value="statistiques_commandes">Statistiques Commandes</Option>
+            <Option value="ventes">Statistiques Ventes</Option>
+            <Option value="clients">Clients actifs</Option>
+            <Option value="produits">Produits</Option>
+            <Option value="fournisseurs">Fournisseurs</Option>
+            <Option value="utilisateurs">Utilisateurs</Option>
           </Select>
-          
-          {reportType === 'ventes' && (
-            <Select
-              value={groupBy}
-              onChange={setGroupBy}
-              style={{ width: 120 }}
-            >
-              <Option value="jour">Par jour</Option>
-              <Option value="produit">Par produit</Option>
-            </Select>
-          )}
         </div>
       </div>
 
@@ -386,14 +327,51 @@ const RapportActivites = () => {
           <Spin size="large" />
         </div>
       ) : (
-        <>
-          {reportType === 'ventes' && renderVentesReport()}
-          {reportType === 'produits' && renderStocksReport()}
-          {reportType === 'commandes' && renderCommandesReport()}
-        </>
+        <Collapse activeKey={activePanels} onChange={setActivePanels}>
+          <Panel header="Statistiques globales" key="1">
+            {renderStatsGlobales()}
+          </Panel>
+          
+          <Panel header="Détails" key="2">
+            {reportType === 'statistiques_commandes' && (
+              <>
+                <Title level={5}>Commandes récentes</Title>
+                {renderCommandesRecentes()}
+              </>
+            )}
+            
+            {['ventes', 'produits'].includes(reportType) && (
+              <>
+                <Title level={5}>Top produits</Title>
+                {renderTopProduits()}
+              </>
+            )}
+            
+            {reportType === 'clients' && (
+              <>
+                <Title level={5}>Clients actifs</Title>
+                {renderClientsActifs()}
+              </>
+            )}
+            
+            {reportType === 'fournisseurs' && (
+              <>
+                <Title level={5}>Fournisseurs</Title>
+                {renderFournisseurs()}
+              </>
+            )}
+            
+            {reportType === 'utilisateurs' && (
+              <>
+                <Title level={5}>Utilisateurs</Title>
+                {renderUtilisateurs()}
+              </>
+            )}
+          </Panel>
+        </Collapse>
       )}
     </div>
   );
 };
 
-export default RapportActivites;
+export default DashboardRapports;

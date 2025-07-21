@@ -85,6 +85,7 @@ class LigneCommandeClientSerializer(serializers.ModelSerializer):
             return 0
 
 class CommandeClientSerializer(serializers.ModelSerializer):
+    utilisateur = serializers.PrimaryKeyRelatedField(read_only=True)
     lignes = LigneCommandeClientSerializer(many=True, default=[])
     tva = serializers.PrimaryKeyRelatedField(
         queryset=Taxe.objects.all(),
@@ -94,13 +95,14 @@ class CommandeClientSerializer(serializers.ModelSerializer):
             'does_not_exist': 'La TVA sélectionnée n\'existe pas'
         }
     )
+    utilisateur = serializers.PrimaryKeyRelatedField(read_only=True)
     class Meta:
         model = CommandeClient
         fields = [
             'id', 'client','tva', 'date_creation', 'statut',
-            'is_vente_directe', 'notes', 'lignes', 'total_ht'
+            'is_vente_directe', 'notes', 'lignes', 'total_ht','utilisateur'
         ]
-        read_only_fields = ['id', 'date_creation', 'total_ht']
+        read_only_fields = ['id', 'date_creation', 'total_ht', 'utilisateur' ]
         extra_kwargs = {
             'client': {'required': False},
             'tva' : {'required': False},

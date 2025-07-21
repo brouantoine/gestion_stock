@@ -45,7 +45,7 @@ function ProduitList() {
     message: '',
     severity: 'success'
   });
-
+  const token = localStorage.getItem('access_token');
   // Fetch des produits
   const fetchProduits = useCallback(async () => {
     try {
@@ -54,6 +54,7 @@ function ProduitList() {
         credentials: 'include',
         headers: {
           'Accept': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
       });
 

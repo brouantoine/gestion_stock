@@ -25,7 +25,12 @@ const ProductAdder = ({
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const response = await fetch('/api/produits/');
+        const token = localStorage.getItem('access_token');
+        const response = await fetch('/api/produits/', {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
         const data = await response.json();
         setProducts(data);
       } catch (error) {

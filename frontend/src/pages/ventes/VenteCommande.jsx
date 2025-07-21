@@ -123,38 +123,51 @@ useEffect(() => {
     // Mais en React, il vaut mieux éviter et utiliser le state/react-dom
   }
 }, []);
-  const handleBarcodeScanned = useCallback((barcode) => {
-    setScanStatus(`Code scanné: ${barcode}`);
-    
-    axios.get(`/api/produits/?codebarre=${barcode}`)
-      .then(response => {
-        if (response.data.results?.length > 0) {
-          setSelectedProduct(response.data.results[0]);
-          setScanStatus(`Produit trouvé: ${response.data.results[0].nom}`);
-        } else {
-          setScanStatus('Produit non trouvé');
-        }
-      })
-      .catch(error => {
-        setScanStatus('Erreur recherche produit');
-        console.error(error);
-      });
-  }, []);
+const token = localStorage.getItem('access_token');
+
+const handleBarcodeScanned = useCallback((barcode) => {
+  setScanStatus(`Code scanné: ${barcode}`);
+
+  axios.get(`/api/produits/?codebarre=${barcode}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  })
+  .then(response => {
+    if (response.data.results?.length > 0) {
+      setSelectedProduct(response.data.results[0]);
+      setScanStatus(`Produit trouvé: ${response.data.results[0].nom}`);
+    } else {
+      setScanStatus('Produit non trouvé');
+    }
+  })
+  .catch(error => {
+    setScanStatus('Erreur recherche produit');
+    console.error(error);
+  });
+}, [token]);
+
 
   useEffect(() => {
-    const loadDirectClient = async () => {
-      try {
-        const response = await axios.get('/api/clients/1/');
-        setDirectClient(response.data);
-        if (typeTransaction === 'VENTE_DIRECTE') {
-          setClient(response.data);
+  const loadDirectClient = async () => {
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await axios.get('/api/clients/1/', {
+        headers: {
+          Authorization: `Bearer ${token}`
         }
-      } catch (error) {
-        console.error("Erreur chargement client direct:", error);
+      });
+      setDirectClient(response.data);
+      if (typeTransaction === 'VENTE_DIRECTE') {
+        setClient(response.data);
       }
-    };
-    loadDirectClient();
-  }, [typeTransaction]);
+    } catch (error) {
+      console.error("Erreur chargement client direct:", error);
+    }
+  };
+  loadDirectClient();
+}, [typeTransaction]);
+
 
   const handleTransactionTypeChange = (type) => {
     setTypeTransaction(type);
@@ -209,7 +222,7 @@ useEffect(() => {
     const payload = {
       client: typeTransaction === 'VENTE_DIRECTE' ? directClient.id : client?.id,
       is_vente_directe: typeTransaction === 'VENTE_DIRECTE',
-      statut: typeTransaction === 'VENTE_DIRECTE' ? 'VALIDEE' : 'BROUILLON',
+      statut: typeTransaction === 'VENTE_DIRECTE' ? 'VALIDEE' : 'VALIDEE',
       tva: parseFloat(tva),  // Conversion en float
       lignes: products.map(item => ({
         produit: item.product.id,
@@ -222,11 +235,15 @@ useEffect(() => {
     // Debug: Afficher le payload avant envoi
     console.log("Payload envoyé:", JSON.stringify(payload, null, 2));
 
-    const response = await axios.post('/api/commandes-client/', payload, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
+   const token = localStorage.getItem('access_token');
+
+      const response = await axios.post('/api/commandes-client/', payload, {
+        headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+    }
+});
+
     
     if (response.status === 201) {
       setSuccess("Transaction enregistrée avec succès!");

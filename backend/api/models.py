@@ -24,7 +24,8 @@ class Utilisateur(AbstractUser):
     role = models.CharField(max_length=20, choices=ROLES, default='vendeur')
     telephone = models.CharField(max_length=20, blank=True, null=True)
     date_creation = models.DateTimeField(auto_now_add=True)
-    est_actif = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+
     
     # Relations many-to-many pour les permissions spécifiques
     custom_permissions = models.ManyToManyField(
@@ -257,7 +258,7 @@ class MouvementStock(models.Model):
     def __str__(self):
         return f"{self.type_mouvement} de {self.quantite} {self.produit.unite_mesure} pour {self.produit}"
 
-    from django.db import models
+from django.db import models
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import Count, Sum, Q
@@ -391,57 +392,9 @@ class ActivityLog(models.Model):
     def __str__(self):
         return f"{self.user} - {self.get_action_display()} à {self.timestamp}"
     
-class Vente(models.Model):
-    STATUS_CHOICES = [
-        ('BROUILLON', 'Brouillon'),
-        ('VALIDEE', 'Validée'),
-        ('PAYEE', 'Payée'),
-        ('ANNULEE', 'Annulée'),
-    ]
-    
-    client = models.ForeignKey(Client, on_delete=models.PROTECT)
-    date_vente = models.DateTimeField(auto_now_add=True)
-    statut = models.CharField(max_length=20, choices=STATUS_CHOICES, default='BROUILLON')
-    utilisateur = models.ForeignKey(Utilisateur, on_delete=models.PROTECT)
-    remise = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    notes = models.TextField(blank=True)
-    numero_facture = models.CharField(max_length=20, unique=True, blank=True)
-    # Ajouter dans les deux modèles
-    tva = models.ForeignKey(Taxe, on_delete=models.PROTECT)
-    date_echeance = models.DateField(blank=True, null=True)  # Pour paiement
-
-class LigneVente(models.Model):
-    vente = models.ForeignKey(Vente, on_delete=models.CASCADE, related_name='lignes')
-    produit = models.ForeignKey(Produit, on_delete=models.PROTECT)
-    quantite = models.IntegerField(validators=[MinValueValidator(1)])
-    prix_unitaire = models.DecimalField(max_digits=10, decimal_places=2)
-
-class Inventaire(models.Model):
-    date = models.DateTimeField(auto_now_add=True)
-    responsable = models.ForeignKey(Utilisateur, on_delete=models.PROTECT)
-    complet = models.BooleanField(default=False)
-
-class LigneInventaire(models.Model):
-    inventaire = models.ForeignKey(Inventaire, on_delete=models.CASCADE)
-    produit = models.ForeignKey(Produit, on_delete=models.PROTECT)
-    quantite_theorique = models.IntegerField()
-    quantite_reelle = models.IntegerField()
-    ecart = models.IntegerField(default=0)
-
-class Parametres(models.Model):
-    seuil_alerte_defaut = models.IntegerField(default=5)
-    tva_par_defaut = models.ForeignKey(Taxe, on_delete=models.PROTECT)
-    logo = models.ImageField(upload_to='logos/', blank=True)
 
 
-class Emplacement(models.Model):
-    nom = models.CharField(max_length=100)
-    adresse = models.TextField()
 
-class StockProduit(models.Model):
-    produit = models.ForeignKey(Produit, on_delete=models.CASCADE)
-    emplacement = models.ForeignKey(Emplacement, on_delete=models.CASCADE)
-    quantite = models.IntegerField(default=0)
 
 
 from django.db import models
@@ -455,12 +408,8 @@ class CommandeClient(models.Model):
         super().save(*args, **kwargs)
 
     STATUT_CHOICES = [
-        ('BROUILLON', 'Brouillon (panier non validé)'),
         ('VALIDEE', 'Validée par le client'),
-        ('EN_PREPARATION', 'En préparation'),
-        ('PRETE', 'Prête pour retrait/livraison'),
-        ('LIVREE', 'Livrée'),
-        ('ANNULEE', 'Annulée'),
+
     ]
 
     MODE_RETRAIT = [
@@ -471,8 +420,7 @@ class CommandeClient(models.Model):
     # Identifiant unique (ex: "CMD-2023-001")
     numero_commande = models.CharField(max_length=20, unique=True, blank=True)
     client = models.ForeignKey('Client', on_delete=models.PROTECT, related_name='commandes')
-    utilisateur = models.ForeignKey('Utilisateur', on_delete=models.PROTECT, null=True, blank=True)  # Vendeur/Caissier
-    
+    utilisateur = models.ForeignKey('Utilisateur', on_delete=models.PROTECT, null=True, blank=True, related_name='commandes_client')
     # Logistique
     mode_retrait = models.CharField(max_length=10, choices=MODE_RETRAIT, default='MAGASIN')
     adresse_livraison = models.TextField(blank=True)  # Si livraison
@@ -481,7 +429,7 @@ class CommandeClient(models.Model):
     date_livraison_reelle = models.DateTimeField(null=True, blank=True)
     is_vente_directe = models.BooleanField(default=False)
     # État
-    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='BROUILLON')
+    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='Validée par le client')
     est_payee = models.BooleanField(default=False)
     
     # Financier
@@ -550,3 +498,5 @@ class LigneCommandeClient(models.Model):
             return (quantite * prix) * (1 - remise / 100)
         except (TypeError, AttributeError):
             return 0
+        
+    user = Utilisateur(username="brou")

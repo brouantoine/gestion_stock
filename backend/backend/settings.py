@@ -28,7 +28,6 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
-CSRF_TRUSTED_ORIGINS = ['http://localhost:3000']
 # Application definition
 
 INSTALLED_APPS = [
@@ -55,7 +54,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    # 'django.middleware.csrf.CsrfViewMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -155,14 +154,20 @@ STATICFILES_DIRS = [
 
 
 REST_FRAMEWORK = {
-    'DEFAULT_FILTER_BACKENDS':
-     [ #'django_filters.rest_framework.DjangoFilterBackend',
-    # 'rest_framework_simplejwt.authentication.JWTAuthentication',
-    ],
+    # AUTHENTIFICATION
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
 
-    'DEFAULT_RENDERER_CLASSES': [
-        'rest_framework.renderers.JSONRenderer', 
-    ]
+    # # FILTRAGE
+    'DEFAULT_FILTER_BACKENDS': (
+        'django_filters.rest_framework.DjangoFilterBackend',
+    ),
+    
+    # Optionnel : Permissions par défaut
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
 }
 
 
@@ -183,7 +188,17 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ]
-CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://192.168.1.102:3000",
+    "http://192.168.1.100:3000"
+]
+
+
 CORS_ALLOW_CREDENTIALS = True  # Important si vous utilisez des cookies/sessions
 
 CORS_ALLOW_METHODS = [
@@ -213,6 +228,7 @@ AUTHENTICATION_BACKENDS = [
 # settings.py
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "http://localhost:8000",
     "http://192.168.1.102:3000",
     "http://192.168.1.100:3000"
 ]

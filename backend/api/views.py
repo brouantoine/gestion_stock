@@ -1,5 +1,5 @@
 # api/views.py
-from decimal import Decimal
+from django.db.models import DecimalField 
 from django.db.models import Value 
 from urllib import request
 from django.db import models
@@ -48,7 +48,11 @@ class IsVendeurOrCaissier(BasePermission):
 
 
 
+from rest_framework_simplejwt.authentication import JWTAuthentication
+
 class ProduitViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
     queryset = Produit.objects.all()
     serializer_class = ProduitSerializer
 
@@ -84,6 +88,8 @@ from .models import Client
 from .serializers import ClientSerializer
 
 class ClientViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
     serializer_class = ClientSerializer
     queryset = Client.objects.all().order_by('-date_creation')
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -256,12 +262,18 @@ from django.core.exceptions import ValidationError
 from rest_framework.exceptions import APIException
 
 class CommandeClientViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
     queryset = CommandeClient.objects.all()
     serializer_class = CommandeClientSerializer
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = request.data.copy()
+
+        if request.user.is_authenticated:
+            data['utilisateur'] = request.user.id
+            
         is_vente_directe = data.get('is_vente_directe', False)
         
         # Configuration automatique pour les ventes directes
@@ -304,7 +316,8 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
 
         try:
             # Phase 2: Création de la commande
-            commande = serializer.save()
+            commande = serializer.save(utilisateur=request.user)
+
             
             # Création des lignes de commande
             for line in lignes_data:
@@ -576,7 +589,7 @@ from django.contrib.auth.hashers import make_password
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = Utilisateur.objects.all()
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdmin]
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -659,10 +672,10 @@ from .models import Commande
 from .serializers import CommandeSerializer
 
 class CommandeViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
     queryset = Commande.objects.all()
     serializer_class = CommandeSerializer
-    # permission_classes = [IsAuthenticated]
-
     def get_queryset(self):
         queryset = super().get_queryset()
         
@@ -676,6 +689,8 @@ class CommandeViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(statut=statut)
             
         return queryset.order_by('-date_creation')
+    
+    
 from django.db.models import Sum, ExpressionWrapper, F, DecimalField, Q
 from datetime import datetime, time as datetime_time, date
 from django.utils import timezone
@@ -1019,39 +1034,82 @@ class RapportAPIView(APIView):
             total_ca=Sum(F('quantite') * F('prix_unitaire'), output_field=FloatField())
         ).order_by('-total_ca')[:limit]
     
+    
+
     def _get_rapport_utilisateurs(self, start_date, end_date, request):
-        """Rapport des utilisateurs avec toutes les ventes effectuées et CA total"""
         try:
-            # Conversion des dates en datetime aware
             start_date = timezone.make_aware(datetime.combine(start_date, datetime_time.min))
             end_date = timezone.make_aware(datetime.combine(end_date, datetime_time.max))
 
-            # Configuration du type décimal
-            decimal_field = DecimalField(max_digits=12, decimal_places=2)
-            
-            utilisateurs = Utilisateur.objects.filter(
-                commandes__date_creation__range=(start_date, end_date)
-            ).annotate(
-                nb_commandes=Count('commandes', distinct=True),
-                total_ca=Coalesce(
-                    Sum(
-                        ExpressionWrapper(
-                            F('commandes__lignes__quantite') * 
-                            F('commandes__lignes__prix_unitaire') * 
-                            (1 - F('commandes__lignes__remise_ligne')/Value(100.0)),
-                            output_field=decimal_field
-                        )
-                    ),
-                    Value(0, output_field=decimal_field)
-                )
-            ).values(
-                'id', 'username', 'role', 'nb_commandes', 'total_ca'
-            ).order_by('-total_ca')
+            utilisateurs = Utilisateur.objects.all()
+            result = []
 
-            # Conversion des Decimal en float pour la réponse JSON
-            result = list(utilisateurs)
-            for item in result:
-                item['total_ca'] = float(item['total_ca'])
+            # Expression dynamique pour le total_ligne_ht
+            total_expr = ExpressionWrapper(
+                F('lignes__prix_unitaire') * F('lignes__quantite'),
+                output_field=DecimalField()
+            )
+
+            for u in utilisateurs:
+                # --- Commandes Fournisseurs ---
+                commandes_fournisseur = Commande.objects.filter(
+                    utilisateur=u,
+                    date_creation__range=(start_date, end_date)
+                )
+                nb_commandes_fournisseur = commandes_fournisseur.count()
+
+                total_fournisseur = commandes_fournisseur.aggregate(
+                    total=Coalesce(Sum(total_expr), Value(0), output_field=DecimalField())
+                )['total'] or 0
+
+                fournisseurs = list(
+                    commandes_fournisseur.values_list('fournisseur__nom_fournisseur', flat=True).distinct()
+                )
+
+                # --- Commandes Clients (vente normale) ---
+                commandes_client = CommandeClient.objects.filter(
+                    utilisateur=u,
+                    date_creation__range=(start_date, end_date),
+                    is_vente_directe=False
+                )
+                nb_commandes_client = commandes_client.count()
+                total_commande_client = commandes_client.aggregate(
+                    total=Coalesce(Sum(total_expr), Value(0), output_field=DecimalField())
+                )['total'] or 0
+
+                # --- Ventes directes ---
+                ventes_directes = CommandeClient.objects.filter(
+                    utilisateur=u,
+                    date_creation__range=(start_date, end_date),
+                    is_vente_directe=True
+                )
+                nb_ventes_directes = ventes_directes.count()
+                total_ventes_directes = ventes_directes.aggregate(
+                    total=Coalesce(Sum(total_expr), Value(0), output_field=DecimalField())
+                )['total'] or 0
+
+                # --- Total global CA ---
+                total_ca = total_commande_client + total_ventes_directes
+
+                result.append({
+                    "id": u.id,
+                    "username": u.username,
+                    "role": u.role,
+                    "Commandes fournisseurs": {
+                        "nombre": nb_commandes_fournisseur,
+                        "total": round(total_fournisseur, 2),
+                        "fournisseurs": fournisseurs
+                    },
+                    "Commandes clients effectuées": {
+                        "nombre": nb_commandes_client,
+                        "total": round(total_commande_client, 2)
+                    },
+                    "Ventes directes effectuées": {
+                        "nombre": nb_ventes_directes,
+                        "total": round(total_ventes_directes, 2)
+                    },
+                    "Chiffre d'affaires total": round(total_ca, 2),
+                })
 
             return Response({
                 "success": True,
@@ -1066,11 +1124,8 @@ class RapportAPIView(APIView):
 
         except Exception as e:
             logger.error(f"Erreur rapport utilisateurs: {str(e)}", exc_info=True)
-            return Response(
-                {
-                    "success": False,
-                    "error": "Erreur lors du calcul du rapport des utilisateurs",
-                    "details": str(e)
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({
+                "success": False,
+                "error": "Erreur lors du calcul du rapport des utilisateurs",
+                "details": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

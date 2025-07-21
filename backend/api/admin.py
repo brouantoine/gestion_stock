@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import Produit
 
 from .models import *
-admin.site.register([Utilisateur, Client, Fournisseur, Commande, LigneCommande, MouvementStock, Categorie,Taxe, Produit, Statistique, Parametres,])
+admin.site.register([Utilisateur, Client, Fournisseur, Commande, LigneCommande, MouvementStock, Categorie,Taxe, Produit, Statistique])
 
 
 class ProduitAdmin(admin.ModelAdmin):
@@ -29,10 +29,9 @@ class CommandeClientAdmin(admin.ModelAdmin):
         'date_creation',
         'display_lignes_summary'
     )
-    
-    fieldsets = (
-        # ... (votre configuration fieldsets existante)
-    )
+    list_display = ('id', 'client', 'is_vente_directe', 'statut', 'utilisateur', 'date_creation')
+    list_filter = ('is_vente_directe', 'statut', 'utilisateur')
+    search_fields = ('client__nom', 'utilisateur__username')
 
     def display_lignes_summary(self, obj):
         lignes = obj.lignes.annotate(
@@ -74,6 +73,8 @@ class CommandeClientAdmin(admin.ModelAdmin):
         </table>
         """
         return format_html(html)
+    
+    display_lignes_summary.short_description = "Résumé de la commande"
 
 class RoleChangeLog(models.Model):
     user = models.ForeignKey(Utilisateur, on_delete=models.CASCADE, related_name='role_changes')
