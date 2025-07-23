@@ -284,3 +284,16 @@ LOGGING = {
         },
     },
 }
+
+
+# settings.py
+
+# Pour les fichiers statiques
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
+
+# Thème admin personnalisé
+ADMIN_SITE_HEADER = "Gestock Admin"
+ADMIN_SITE_TITLE = "Administration"
+ADMIN_INDEX_TITLE = "Tableau de bord"

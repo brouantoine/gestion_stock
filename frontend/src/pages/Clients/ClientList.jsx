@@ -12,7 +12,12 @@ const ClientList = () => {
 
   const fetchClients = async () => {
     try {
-      const response = await axios.get('/api/clients/');
+      const token = localStorage.getItem('access_token'); // Assurez-vous que le token est récupéré si nécessaire
+      const response = await axios.get('/api/clients/', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       setClients(response.data);
     } catch (error) {
       message.error('Erreur lors du chargement des clients');

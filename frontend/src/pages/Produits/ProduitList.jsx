@@ -45,17 +45,24 @@ function ProduitList() {
     message: '',
     severity: 'success'
   });
-  const token = localStorage.getItem('access_token');
+
+  // Fonction pour obtenir le token et les headers
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('access_token');
+    return {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    };
+  };
+
   // Fetch des produits
   const fetchProduits = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch('http://localhost:8000/api/produits/', {
         credentials: 'include',
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders()
       });
 
       if (!response.ok) {
@@ -163,93 +170,83 @@ function ProduitList() {
   };
 
   const handleMarkInactive = async () => {
-  try {
-    const response = await fetch(`http://localhost:8000/api/produits/${selectedProduit.id}/mark_inactive/`, {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ est_actif: false })
-    });
+    try {
+      const response = await fetch(`http://localhost:8000/api/produits/${selectedProduit.id}/mark_inactive/`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ est_actif: false })
+      });
 
-    if (!response.ok) throw new Error("Échec de la désactivation");
+      if (!response.ok) throw new Error("Échec de la désactivation");
 
-    fetchProduits();
-    showSnackbar('Produit marqué comme inactif');
-    setOpenDeleteDialog(false);
-    setShowInactiveOption(false);
-  } catch (err) {
-    showSnackbar(err.message, 'error');
-  }
-};
-
-// Modifiez handleDeleteConfirm
-const handleDeleteConfirm = async () => {
-  try {
-    const response = await fetch(`http://localhost:8000/api/produits/${selectedProduit.id}/`, {
-      method: 'DELETE',
-      credentials: 'include'
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      if (errorData.detail?.includes("utilisé dans des commandes")) {
-        setShowInactiveOption(true);
-        return;
-      }
-      throw new Error(errorData.detail || 'Erreur lors de la suppression');
+      fetchProduits();
+      showSnackbar('Produit marqué comme inactif');
+      setOpenDeleteDialog(false);
+      setShowInactiveOption(false);
+    } catch (err) {
+      showSnackbar(err.message, 'error');
     }
+  };
 
-    fetchProduits();
-    showSnackbar('Produit supprimé avec succès');
-    setOpenDeleteDialog(false);
-  } catch (err) {
-    showSnackbar(err.message, 'error');
-  }
-};
+  const handleDeleteConfirm = async () => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/produits/${selectedProduit.id}/`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        if (errorData.detail?.includes("utilisé dans des commandes")) {
+          setShowInactiveOption(true);
+          return;
+        }
+        throw new Error(errorData.detail || 'Erreur lors de la suppression');
+      }
+
+      fetchProduits();
+      showSnackbar('Produit supprimé avec succès');
+      setOpenDeleteDialog(false);
+    } catch (err) {
+      showSnackbar(err.message, 'error');
+    }
+  };
 
   const handleSave = async (produitData) => {
-  try {
-    const isEdit = !!produitData.id;
-    const url = isEdit 
-      ? `http://localhost:8000/api/produits/${produitData.id}/`
-      : 'http://localhost:8000/api/produits/';
+    try {
+      const isEdit = !!produitData.id;
+      const url = isEdit 
+        ? `http://localhost:8000/api/produits/${produitData.id}/`
+        : 'http://localhost:8000/api/produits/';
 
-    // Préparer les données à envoyer (seulement les champs modifiables)
-    const dataToSend = {
-      designation: produitData.designation,
-      prix_vente: Number(produitData.prix_vente),
-      quantite_stock: Number(produitData.quantite_stock),
-      unite_mesure: produitData.unite_mesure,
-      // Ajouter d'autres champs modifiables si nécessaire
-    };
+      const dataToSend = {
+        designation: produitData.designation,
+        prix_vente: Number(produitData.prix_vente),
+        quantite_stock: Number(produitData.quantite_stock),
+        unite_mesure: produitData.unite_mesure,
+      };
 
-    console.log('Données envoyées:', dataToSend); // Pour débogage
+      const response = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dataToSend),
+        credentials: 'include'
+      });
 
-    const response = await fetch(url, {
-      method: isEdit ? 'PUT' : 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(dataToSend),
-      credentials: 'include'
-    });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || JSON.stringify(errorData));
+      }
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Erreur détaillée:', errorData); // Log l'erreur du backend
-      throw new Error(errorData.detail || JSON.stringify(errorData));
+      fetchProduits();
+      showSnackbar(`Produit ${isEdit ? 'modifié' : 'créé'} avec succès`);
+      isEdit ? setOpenEditDialog(false) : setOpenCreateDialog(false);
+    } catch (err) {
+      showSnackbar(`Erreur: ${err.message}`, 'error');
     }
-
-    fetchProduits();
-    showSnackbar(`Produit ${isEdit ? 'modifié' : 'créé'} avec succès`);
-    isEdit ? setOpenEditDialog(false) : setOpenCreateDialog(false);
-  } catch (err) {
-    console.error('Erreur complète:', err);
-    showSnackbar(`Erreur: ${err.message}`, 'error');
-  }
-};
+  };
 
   return (
     <Paper elevation={3} sx={{ padding: 3, margin: 2, minHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
@@ -319,10 +316,32 @@ const handleDeleteConfirm = async () => {
           <Typography>
             Supprimer "{selectedProduit?.designation}" (Réf: {selectedProduit?.reference}) ?
           </Typography>
+          {showInactiveOption && (
+            <Box mt={2}>
+              <Typography variant="body2" color="error">
+                Ce produit est utilisé dans des commandes existantes.
+              </Typography>
+              <Typography variant="body2">
+                Vous pouvez le marquer comme inactif à la place.
+              </Typography>
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenDeleteDialog(false)}>Annuler</Button>
-          <Button onClick={handleDeleteConfirm} color="error">Confirmer</Button>
+          <Button onClick={() => {
+            setOpenDeleteDialog(false);
+            setShowInactiveOption(false);
+          }}>Annuler</Button>
+          
+          {showInactiveOption ? (
+            <Button onClick={handleMarkInactive} color="warning">
+              Marquer comme inactif
+            </Button>
+          ) : (
+            <Button onClick={handleDeleteConfirm} color="error">
+              Confirmer la suppression
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 

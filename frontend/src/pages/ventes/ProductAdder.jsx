@@ -42,7 +42,6 @@ const ProductAdder = ({
     fetchProducts();
   }, []);
 
-  // Filtrer les produits disponibles (quantité > 0)
   const availableProducts = products.filter(product => product.quantite_stock > 0);
 
   return (
@@ -54,29 +53,23 @@ const ProductAdder = ({
       ) : (
         <Box sx={{ display: 'grid', gap: 2 }}>
           <Autocomplete
-            options={products}
+            options={availableProducts}
             getOptionLabel={(option) => `${option.designation} - ${option.prix_vente} F`}
             value={selectedProduct}
             onChange={(_, newValue) => {
-              // Empêcher la sélection si quantité = 0
-              if (!newValue || newValue.quantite_stock > 0) {
-                setSelectedProduct(newValue);
-              }
+              setSelectedProduct(newValue);
             }}
             renderOption={(props, option) => (
-              <li {...props} 
-                  style={{
-                    ...props.style,
-                    opacity: option.quantite_stock > 0 ? 1 : 0.5,
-                    backgroundColor: option.quantite_stock > 0 ? 'inherit' : '#f5f5f5'
-                  }}>
+              <li {...props}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                   <span>
                     {option.designation} - {option.prix_vente} F
                   </span>
-                  {option.quantite_stock <= 0 && (
-                    <Chip label="rupture" size="small" color="error" />
-                  )}
+                  <Chip 
+                    label={`Stock: ${option.quantite_stock}`} 
+                    size="small" 
+                    color={option.quantite_stock > 0 ? "success" : "error"} 
+                  />
                 </Box>
               </li>
             )}
@@ -90,7 +83,6 @@ const ProductAdder = ({
               />
             )}
             isOptionEqualToValue={(option, value) => option.id === value.id}
-            getOptionDisabled={(option) => option.quantite_stock <= 0}
           />
 
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
@@ -130,7 +122,7 @@ const ProductAdder = ({
             variant="contained"
             startIcon={<Add />}
             onClick={onAdd}
-            disabled={!selectedProduct || (selectedProduct && selectedProduct.quantite_stock <= 0)}
+            disabled={!selectedProduct}
             fullWidth
             sx={{ mt: 1 }}
           >

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { 
   Box, 
@@ -20,86 +20,13 @@ import {
   PointOfSale,
   Person,
   AttachMoney,
-  ShoppingCart,
-  QrCodeScanner
+  ShoppingCart
 } from '@mui/icons-material';
 import ClientSelector from './ClientSelector';
 import TypeSelector from './TypeSelector';
 import ProductAdder from './ProductAdder';
 import ProductList from './ProductList';
-import './scanner.css';
-
-const BarcodeScanner = ({ onDetected, onError }) => {
-  const videoRef = useRef(null);
-
-  useEffect(() => {
-    if (!('BarcodeDetector' in window)) {
-      onError(new Error('Scanner non supporté par votre navigateur'));
-      return;
-    }
-
-    let stream;
-    const initScanner = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            facingMode: "environment",
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          } 
-        });
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-
-        const detector = new window.BarcodeDetector({ formats: ['ean_13'] });
-        
-        const detect = () => {
-          if (!videoRef.current) return;
-          
-          detector.detect(videoRef.current)
-            .then(([result]) => {
-              if (result) {
-                onDetected(result.rawValue);
-              }
-              requestAnimationFrame(detect);
-            })
-            .catch(err => onError(err));
-        };
-        
-        detect();
-      } catch (err) {
-        onError(err);
-      }
-    };
-
-    initScanner();
-    
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [onDetected, onError]);
-
-  return (
-    <video 
-      ref={videoRef}
-      autoPlay
-      playsInline
-      muted
-      style={{
-        width: '100%',
-        height: 'auto',
-        maxHeight: '300px',
-        borderRadius: '4px',
-        border: '2px solid #4CAF50'
-      }}
-    />
-  );
-};
+import Ticket from './Ticket';
 
 const VenteCommande = () => {
   const [typeTransaction, setTypeTransaction] = useState('VENTE_DIRECTE');
@@ -113,61 +40,28 @@ const VenteCommande = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [scanMode, setScanMode] = useState(false);
-  const [scanStatus, setScanStatus] = useState('');
-useEffect(() => {
-  // Ce useEffect garantit que les manipulations DOM sont sécurisées
-  const parent = document.getElementById('root'); // ou ton ID de conteneur principal
-  if (parent) {
-    // Ici tu peux ajouter tes manipulations DOM si nécessaire
-    // Mais en React, il vaut mieux éviter et utiliser le state/react-dom
-  }
-}, []);
-const token = localStorage.getItem('access_token');
-
-const handleBarcodeScanned = useCallback((barcode) => {
-  setScanStatus(`Code scanné: ${barcode}`);
-
-  axios.get(`/api/produits/?codebarre=${barcode}`, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  })
-  .then(response => {
-    if (response.data.results?.length > 0) {
-      setSelectedProduct(response.data.results[0]);
-      setScanStatus(`Produit trouvé: ${response.data.results[0].nom}`);
-    } else {
-      setScanStatus('Produit non trouvé');
-    }
-  })
-  .catch(error => {
-    setScanStatus('Erreur recherche produit');
-    console.error(error);
-  });
-}, [token]);
-
+  const [lastVente, setLastVente] = useState(null);
+  const ticketRef = useRef();
 
   useEffect(() => {
-  const loadDirectClient = async () => {
-    try {
-      const token = localStorage.getItem('access_token');
-      const response = await axios.get('/api/clients/1/', {
-        headers: {
-          Authorization: `Bearer ${token}`
+    const loadDirectClient = async () => {
+      try {
+        const token = localStorage.getItem('access_token');
+        const response = await axios.get('/api/clients/1/', {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+        setDirectClient(response.data);
+        if (typeTransaction === 'VENTE_DIRECTE') {
+          setClient(response.data);
         }
-      });
-      setDirectClient(response.data);
-      if (typeTransaction === 'VENTE_DIRECTE') {
-        setClient(response.data);
+      } catch (error) {
+        console.error("Erreur chargement client direct:", error);
       }
-    } catch (error) {
-      console.error("Erreur chargement client direct:", error);
-    }
-  };
-  loadDirectClient();
-}, [typeTransaction]);
-
+    };
+    loadDirectClient();
+  }, [typeTransaction]);
 
   const handleTransactionTypeChange = (type) => {
     setTypeTransaction(type);
@@ -178,27 +72,37 @@ const handleBarcodeScanned = useCallback((barcode) => {
 
   const handleAddProduct = () => {
     if (!selectedProduct) return;
-    
-    const existingProduct = products.find(p => p.product.id === selectedProduct.id);
-    
-    if (existingProduct) {
-      setProducts(products.map(p => 
-        p.product.id === selectedProduct.id 
-          ? { ...p, quantity: p.quantity + quantity } 
-          : p
-      ));
-    } else {
-      setProducts([
-        ...products,
+
+    setProducts(prevProducts => {
+      const normalizedDiscount = parseFloat(discount) || 0;
+      const normalizedPrice = parseFloat(selectedProduct.prix_vente) || 0;
+
+      const existingIndex = prevProducts.findIndex(p => 
+        p.product.id === selectedProduct.id && 
+        parseFloat(p.unitPrice) === normalizedPrice &&
+        parseFloat(p.discount) === normalizedDiscount
+      );
+
+      if (existingIndex !== -1) {
+        const updated = [...prevProducts];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          quantity: updated[existingIndex].quantity + (parseInt(quantity) || 1)
+        };
+        return updated;
+      }
+
+      return [
+        ...prevProducts,
         {
           product: selectedProduct,
-          quantity,
-          unitPrice: selectedProduct.prix_vente,
-          discount
+          quantity: parseInt(quantity) || 1,
+          unitPrice: normalizedPrice,
+          discount: normalizedDiscount
         }
-      ]);
-    }
-    
+      ];
+    });
+
     setSelectedProduct(null);
     setQuantity(1);
     setDiscount(0);
@@ -208,72 +112,97 @@ const handleBarcodeScanned = useCallback((barcode) => {
     setProducts(products.filter(p => p.product.id !== productId));
   };
 
-  const handleSubmit = async () => {
-  setLoading(true);
-  setError(null);
-  
-  try {
-    // Validations renforcées
-    if (products.length === 0) {
-      throw new Error("Ajoutez au moins un produit");
+  const printTicket = () => {
+    const content = ticketRef.current?.innerHTML;
+    if (!content) return;
+
+    const ticketWindow = window.open('', '_blank', 'width=400,height=600');
+    if (ticketWindow) {
+      ticketWindow.document.write(`
+        <html>
+          <head>
+            <title>Ticket</title>
+            <style>
+              body { font-family: monospace; font-size: 12px; padding: 10px; }
+              h2 { text-align: center; margin: 0 0 10px; }
+              hr { margin: 10px 0; }
+              .line { display: flex; justify-content: space-between; }
+            </style>
+          </head>
+          <body>
+            ${content}
+          </body>
+        </html>
+      `);
+      ticketWindow.document.close();
+      ticketWindow.focus();
+      setTimeout(() => {
+        ticketWindow.print();
+        ticketWindow.close();
+      }, 500);
     }
+  };
 
-    // Construction du payload optimisé
-    const payload = {
-      client: typeTransaction === 'VENTE_DIRECTE' ? directClient.id : client?.id,
-      is_vente_directe: typeTransaction === 'VENTE_DIRECTE',
-      statut: typeTransaction === 'VENTE_DIRECTE' ? 'VALIDEE' : 'VALIDEE',
-      tva: parseFloat(tva),  // Conversion en float
-      lignes: products.map(item => ({
-        produit: item.product.id,
-        quantite: parseInt(item.quantity),  // Conversion en int
-        prix_unitaire: parseFloat(item.unitPrice),  // Conversion en float
-        remise_ligne: parseFloat(item.discount)  // Conversion en float
-      }))
-    };
+  const handleSubmit = async () => {
+    if (loading) return;
 
-    // Debug: Afficher le payload avant envoi
-    console.log("Payload envoyé:", JSON.stringify(payload, null, 2));
+    setLoading(true);
+    setError(null);
 
-   const token = localStorage.getItem('access_token');
+    try {
+      if (products.length === 0) {
+        throw new Error("Ajoutez au moins un produit");
+      }
 
+      const lignes = products.map(item => {
+        const quantite = parseInt(item.quantity);
+        if (isNaN(quantite) || quantite <= 0) {
+          throw new Error(`Quantité invalide pour le produit ${item.product.designation}`);
+        }
+
+        return {
+          produit: item.product.id,
+          quantite: quantite,
+          prix_unitaire: parseFloat(item.unitPrice),
+          remise_ligne: parseFloat(item.discount) || 0
+        };
+      });
+
+      const payload = {
+        client: typeTransaction === 'VENTE_DIRECTE' ? directClient.id : client?.id,
+        is_vente_directe: typeTransaction === 'VENTE_DIRECTE',
+        statut: 'VALIDEE',
+        tva: parseFloat(tva) || 0,
+        lignes: lignes
+      };
+
+      const token = localStorage.getItem('access_token');
       const response = await axios.post('/api/commandes-client/', payload, {
         headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
-    }
-});
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
-    
-    if (response.status === 201) {
-      setSuccess("Transaction enregistrée avec succès!");
-      setProducts([]);
+      if (response.status === 201) {
+        setSuccess("Transaction enregistrée avec succès!");
+        setProducts([]);
+        setLastVente(response.data);
+        setTimeout(() => {
+          printTicket();
+        }, 300);
+      }
+    } catch (error) {
+      console.error("Erreur lors de la soumission:", error);
+      setError(error.response?.data?.message || error.message || "Erreur lors de l'enregistrement");
+    } finally {
+      setLoading(false);
     }
-  } catch (error) {
-    // Gestion d'erreur améliorée
-    let errorMessage = "Erreur lors de l'envoi";
-    
-    if (error.response) {
-      console.error("Réponse erreur:", error.response.data);
-      errorMessage = error.response.data.detail || 
-                   JSON.stringify(error.response.data);
-    } else if (error.request) {
-      console.error("Pas de réponse:", error.request);
-      errorMessage = "Pas de réponse du serveur";
-    } else {
-      console.error("Erreur:", error.message);
-      errorMessage = error.message;
-    }
-    
-    setError(errorMessage);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const calculateTotal = () => {
     return products.reduce((total, item) => {
-      const itemTotal = item.quantity * item.unitPrice * (1 - item.discount/100);
+      const itemTotal = item.quantity * item.unitPrice * (1 - item.discount / 100);
       return total + itemTotal;
     }, 0);
   };
@@ -365,53 +294,6 @@ const handleBarcodeScanned = useCallback((barcode) => {
                 setDiscount={setDiscount}
                 onAdd={handleAddProduct}
               />
-              
-              <Box sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
-                <Button
-                  variant={scanMode ? "contained" : "outlined"}
-                  color={scanMode ? "secondary" : "primary"}
-                  onClick={() => setScanMode(!scanMode)}
-                  startIcon={<QrCodeScanner />}
-                  sx={{ mr: 2 }}
-                >
-                  {scanMode ? 'Arrêter le scan' : 'Scanner code-barres'}
-                </Button>
-                
-                {scanStatus && (
-                  <Typography variant="caption" color="text.secondary">
-                    {scanStatus}
-                  </Typography>
-                )}
-              </Box>
-
-              {scanMode && (
-                <Box sx={{ 
-                  mt: 2,
-                  border: '2px dashed',
-                  borderColor: 'primary.main',
-                  borderRadius: 1,
-                  p: 1,
-                  minHeight: '300px',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center'
-                }}>
-                  {('BarcodeDetector' in window) ? (
-                    <BarcodeScanner 
-                      onDetected={handleBarcodeScanned}
-                      onError={(error) => {
-                        setScanStatus(`Erreur: ${error.message}`);
-                        setScanMode(false);
-                      }}
-                    />
-                  ) : (
-                    <Typography color="error" textAlign="center">
-                      Votre navigateur ne supporte pas le scan direct.<br />
-                      Essayez avec Chrome/Edge sur Android.
-                    </Typography>
-                  )}
-                </Box>
-              )}
             </Paper>
           </Grid>
 
@@ -451,6 +333,13 @@ const handleBarcodeScanned = useCallback((barcode) => {
           </Button>
         </Box>
       </Paper>
+
+      {/* Zone d'impression cachée */}
+      <div style={{ display: 'none' }}>
+        <div ref={ticketRef}>
+          <Ticket vente={lastVente} />
+        </div>
+      </div>
     </Box>
   );
 };

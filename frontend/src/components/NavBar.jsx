@@ -11,7 +11,8 @@ import {
   TeamOutlined,
   HomeOutlined,
   BarChartOutlined,
-  ShoppingCartOutlined
+  ShoppingCartOutlined,
+  ProfileFilled
 } from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext'; // Importez votre contexte d'authentification
 
@@ -29,12 +30,13 @@ const NavBar = ({ children }) => {
 
   // Configuration des éléments de menu avec leurs codes correspondants
   const MENU_ITEMS = [
-    { key: '1', icon: <HomeOutlined />, label: 'Dashboard', path: '/', code: 'DASHBOARD' },
+    { key: '1', icon: <HomeOutlined />, label: 'Dashboard', path: '/', code: 'DASHBOARD', },
     { key: '2', icon: <ShoppingOutlined />, label: 'Produits', path: '/produits', code: 'PRODUIT' },
     { key: '3', icon: <ShoppingCartOutlined />, label: 'Commandes', path: '/commandes', code: 'COMMANDE' },
     { key: '4', icon: <TeamOutlined />, label: 'Clients', path: '/clients', code: 'CLIENT' },
     { key: '5', icon: <UserOutlined />, label: 'Utilisateurs', path: '/utilisateurs', code: 'UTILISATEUR' },
-    { key: '6', icon: <BarChartOutlined />, label: 'Statistiques', path: '/statistiques', code: 'STATS' }
+    { key: '6', icon: <BarChartOutlined />, label: 'Statistiques', path: '/statistiques', code: 'STATS' },
+    { key: '7', icon: <ProfileFilled />, label: 'Rapports', path: '/rapports', code: 'RAPPORT' }
   ];
 
   // Filtre les éléments du menu selon les modules autorisés

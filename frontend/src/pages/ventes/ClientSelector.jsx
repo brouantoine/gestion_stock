@@ -24,7 +24,12 @@ const ClientSelector = ({
       const fetchClients = async () => {
         setLoading(true);
         try {
-          const response = await fetch('/api/clients/');
+          const token = localStorage.getItem('access_token');
+          const response = await fetch('/api/clients/', {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
           const data = await response.json();
           setClients(data);
         } catch (error) {

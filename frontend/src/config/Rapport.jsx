@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Card, Table, Tag, DatePicker, Select, 
   Spin, notification, Row, Col, Statistic, 
-  Button, Typography, Divider, Collapse, Empty 
+  Typography, Collapse, Empty 
 } from 'antd';
 import { 
   BarChart, Bar, XAxis, YAxis, 
@@ -10,14 +10,11 @@ import {
 } from 'recharts';
 import axios from 'axios';
 import moment from 'moment';
-import { DownloadOutlined } from '@ant-design/icons';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
-const { Title, Text } = Typography;
+const { Title } = Typography;
 const { Panel } = Collapse;
-
-// Removed TypeScript type alias, use plain JS
 
 const DashboardRapports = () => {
   const [loading, setLoading] = useState(false);
@@ -81,9 +78,9 @@ const DashboardRapports = () => {
           <Card>
             <Statistic
               title="Chiffre d'affaires total"
-              value={stats.total_ca}
+              value={stats.total_ca || 0}
               precision={2}
-              suffix="€"
+              suffix="F CFA"
             />
           </Card>
         </Col>
@@ -91,7 +88,7 @@ const DashboardRapports = () => {
           <Card>
             <Statistic
               title="Total ventes"
-              value={stats.total_ventes}
+              value={stats.total_ventes || 0}
             />
           </Card>
         </Col>
@@ -99,7 +96,7 @@ const DashboardRapports = () => {
           <Card>
             <Statistic
               title="Ventes directes"
-              value={stats.ventes_directes}
+              value={stats.ventes_directes || 0}
             />
           </Card>
         </Col>
@@ -107,7 +104,7 @@ const DashboardRapports = () => {
           <Card>
             <Statistic
               title="Commandes clients"
-              value={stats.commandes_clients}
+              value={stats.commandes_clients || 0}
             />
           </Card>
         </Col>
@@ -141,7 +138,7 @@ const DashboardRapports = () => {
             title: 'Montant',
             dataIndex: 'total',
             key: 'total',
-            render: total => `${parseFloat(total).toFixed(2)} €`
+            render: total => `${parseFloat(total).toFixed(2)} F CFA`
           },
           {
             title: 'Type',
@@ -149,7 +146,7 @@ const DashboardRapports = () => {
             key: 'type',
             render: isDirect => (
               <Tag color={isDirect ? 'green' : 'blue'}>
-                {isDirect ? 'Vente directe' : 'Commande'}
+                {isDirect ? 'Vente directe' : 'Commande client'}
               </Tag>
             )
           }
@@ -182,7 +179,7 @@ const DashboardRapports = () => {
             title: 'CA généré',
             dataIndex: 'total_ca',
             key: 'ca',
-            render: ca => `${parseFloat(ca).toFixed(2)} €`
+            render: ca => `${parseFloat(ca).toFixed(2)} F CFA`
           }
         ]}
         dataSource={data.top_produits}
@@ -213,7 +210,7 @@ const DashboardRapports = () => {
             title: 'CA généré',
             dataIndex: 'total_ca',
             key: 'ca',
-            render: ca => `${parseFloat(ca).toFixed(2)} €`
+            render: ca => `${parseFloat(ca).toFixed(2)} F CFA`
           }
         ]}
         dataSource={data.clients_actifs}
@@ -275,7 +272,7 @@ const DashboardRapports = () => {
             title: 'CA total',
             dataIndex: 'Chiffre d\'affaires total',
             key: 'ca',
-            render: ca => `${parseFloat(ca).toFixed(2)} €`
+            render: ca => `${parseFloat(ca).toFixed(2)} F CFA`
           }
         ]}
         dataSource={data.utilisateurs}
@@ -285,8 +282,8 @@ const DashboardRapports = () => {
         expandable={{
           expandedRowRender: record => (
             <div style={{ margin: 0 }}>
-              <p><strong>Commandes fournisseurs:</strong> {record['Commandes fournisseurs'].nombre}</p>
-              <p><strong>Ventes directes:</strong> {record['Ventes directes effectuées'].nombre}</p>
+              <p><strong>Commandes fournisseurs:</strong> {record['Commandes fournisseurs']?.nombre}</p>
+              <p><strong>Ventes directes:</strong> {record['Ventes directes effectuées']?.nombre}</p>
             </div>
           )
         }}
@@ -298,7 +295,6 @@ const DashboardRapports = () => {
     <div className="p-4">
       <div className="flex justify-between items-center mb-6">
         <Title level={3}>Tableau de bord analytique</Title>
-        
         <div className="flex space-x-4">
           <RangePicker
             value={dateRange}
@@ -306,7 +302,6 @@ const DashboardRapports = () => {
             format="DD/MM/YYYY"
             disabledDate={current => current > moment().endOf('day')}
           />
-          
           <Select
             value={reportType}
             onChange={setReportType}
@@ -331,7 +326,6 @@ const DashboardRapports = () => {
           <Panel header="Statistiques globales" key="1">
             {renderStatsGlobales()}
           </Panel>
-          
           <Panel header="Détails" key="2">
             {reportType === 'statistiques_commandes' && (
               <>
@@ -339,28 +333,24 @@ const DashboardRapports = () => {
                 {renderCommandesRecentes()}
               </>
             )}
-            
             {['ventes', 'produits'].includes(reportType) && (
               <>
                 <Title level={5}>Top produits</Title>
                 {renderTopProduits()}
               </>
             )}
-            
             {reportType === 'clients' && (
               <>
                 <Title level={5}>Clients actifs</Title>
                 {renderClientsActifs()}
               </>
             )}
-            
             {reportType === 'fournisseurs' && (
               <>
                 <Title level={5}>Fournisseurs</Title>
                 {renderFournisseurs()}
               </>
             )}
-            
             {reportType === 'utilisateurs' && (
               <>
                 <Title level={5}>Utilisateurs</Title>

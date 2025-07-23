@@ -78,9 +78,14 @@ const StatisticsDashboard = () => {
   // Fonction pour récupérer toutes les données
   const fetchAllData = async () => {
     try {
+      const token = localStorage.getItem('access_token');
       setLoading(true);
-      const response = await axios.get('/api/statistiques/');
-      
+      const response = await axios.get('/api/statistiques/', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
       if (response.data.success) {
         setRawData(response.data.data);
         applyFilters(response.data.data, startDate, endDate, viewMode);
