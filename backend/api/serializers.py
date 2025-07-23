@@ -61,15 +61,19 @@ class ClientSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Le numéro doit contenir au moins 10 chiffres")
         return value
 
+from rest_framework import serializers
+from decimal import Decimal
+from .models import CommandeClient, LigneCommandeClient, Produit, Taxe
+
 class LigneCommandeClientSerializer(serializers.ModelSerializer):
     produit = serializers.PrimaryKeyRelatedField(queryset=Produit.objects.all())
-    total_ligne_ht = serializers.SerializerMethodField()  # Champ calculé
+    total_ligne_ht = serializers.SerializerMethodField()
     
     class Meta:
         model = LigneCommandeClient
         fields = [
             'id', 'produit', 'quantite', 'prix_unitaire', 
-            'remise_ligne', 'total_ligne_ht'  # Maintenant valide car c'est un SerializerMethodField
+            'remise_ligne', 'total_ligne_ht'
         ]
         read_only_fields = ['id', 'total_ligne_ht']
         extra_kwargs = {
@@ -78,15 +82,13 @@ class LigneCommandeClientSerializer(serializers.ModelSerializer):
         }
 
     def get_total_ligne_ht(self, obj):
-        """Calcule le total HT de la ligne"""
         try:
             return (obj.quantite * obj.prix_unitaire) * (1 - obj.remise_ligne / 100)
         except (TypeError, AttributeError):
             return 0
 
 class CommandeClientSerializer(serializers.ModelSerializer):
-    utilisateur = serializers.PrimaryKeyRelatedField(read_only=True)
-    lignes = LigneCommandeClientSerializer(many=True, default=[])
+    lignes = LigneCommandeClientSerializer(many=True)
     tva = serializers.PrimaryKeyRelatedField(
         queryset=Taxe.objects.all(),
         required=True,
@@ -95,57 +97,49 @@ class CommandeClientSerializer(serializers.ModelSerializer):
             'does_not_exist': 'La TVA sélectionnée n\'existe pas'
         }
     )
-    utilisateur = serializers.PrimaryKeyRelatedField(read_only=True)
+
     class Meta:
         model = CommandeClient
         fields = [
-            'id', 'client','tva', 'date_creation', 'statut',
-            'is_vente_directe', 'notes', 'lignes', 'total_ht','utilisateur'
+            'id', 'client', 'tva', 'date_creation', 'statut',
+            'is_vente_directe', 'notes', 'lignes', 'total_commande', 'utilisateur'
         ]
-        read_only_fields = ['id', 'date_creation', 'total_ht', 'utilisateur' ]
-        extra_kwargs = {
-            'client': {'required': False},
-            'tva' : {'required': False},
-        }
-    
+        read_only_fields = ['id', 'date_creation', 'total_commande', 'utilisateur']
+
     def validate(self, data):
+        # Validation client pour les commandes non-directes
         if not data.get('is_vente_directe') and not data.get('client'):
             raise serializers.ValidationError(
                 "Un client est requis pour les commandes non-directes"
             )
+        
+        # Validation des doublons dans les lignes
+        if 'lignes' in data:
+            produits = [line['produit'].id for line in data['lignes']]
+            if len(produits) != len(set(produits)):
+                raise serializers.ValidationError(
+                    {"lignes": "Un produit ne peut apparaître qu'une fois par commande"}
+                )
+        
         return data
 
     def create(self, validated_data):
-        # Extraire les données des lignes de commande
-        lignes_data = validated_data.pop('lignes')
-        
-        # Créer la commande client
+        lignes_data = validated_data.pop('lignes', [])
         commande = CommandeClient.objects.create(**validated_data)
-        
-        # Créer les lignes de commande associées
-        for ligne_data in lignes_data:
-            LigneCommandeClient.objects.create(commande=commande, **ligne_data)
-        
+        commande.add_lignes(lignes_data)
         return commande
 
     def update(self, instance, validated_data):
-        # Gestion des lignes lors de la mise à jour
         lignes_data = validated_data.pop('lignes', None)
         
-        # Mise à jour des champs de base
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-        
-        # Gestion des lignes si fournies
+
         if lignes_data is not None:
-            # Supprimer les anciennes lignes
             instance.lignes.all().delete()
-            
-            # Créer les nouvelles lignes
-            for ligne_data in lignes_data:
-                LigneCommandeClient.objects.create(commande=instance, **ligne_data)
-        
+            instance.add_lignes(lignes_data)
+
         return instance
     
 class PermissionSerializer(serializers.ModelSerializer):

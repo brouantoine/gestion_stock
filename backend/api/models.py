@@ -9,7 +9,7 @@ from api import permissions
 
 class Taxe(models.Model):
     nom = models.CharField(max_length=50)
-    taux = models.DecimalField(max_digits=5, decimal_places=2)  # 20.00 pour 20%
+    taux = models.DecimalField(max_digits=5, decimal_places=2) 
     code_comptable = models.CharField(max_length=20, blank=True)
     
 from django.contrib.auth.models import AbstractUser, Group, Permission
@@ -394,22 +394,13 @@ class ActivityLog(models.Model):
     
 
 
-
-
-
 from django.db import models
 from django.core.validators import MinValueValidator
+from decimal import Decimal
 
 class CommandeClient(models.Model):
-    date_creation = models.DateTimeField()
-
-    def save(self, *args, **kwargs):
-        print("DATE CREATION AVANT ENREGISTREMENT :", self.date_creation)
-        super().save(*args, **kwargs)
-
     STATUT_CHOICES = [
         ('VALIDEE', 'Validée par le client'),
-
     ]
 
     MODE_RETRAIT = [
@@ -417,86 +408,93 @@ class CommandeClient(models.Model):
         ('LIVRAISON', 'Livraison à domicile'),
     ]
 
-    # Identifiant unique (ex: "CMD-2023-001")
     numero_commande = models.CharField(max_length=20, unique=True, blank=True)
     client = models.ForeignKey('Client', on_delete=models.PROTECT, related_name='commandes')
     utilisateur = models.ForeignKey('Utilisateur', on_delete=models.PROTECT, null=True, blank=True, related_name='commandes_client')
-    # Logistique
+    tva = models.ForeignKey('Taxe', on_delete=models.PROTECT, null=True, blank=True, default=1)
     mode_retrait = models.CharField(max_length=10, choices=MODE_RETRAIT, default='MAGASIN')
-    adresse_livraison = models.TextField(blank=True)  # Si livraison
-    date_creation = models.DateTimeField(auto_now_add=True, verbose_name="Date de création")
+    adresse_livraison = models.TextField(blank=True)
+    date_creation = models.DateTimeField(auto_now_add=True)
     date_livraison_prevue = models.DateTimeField(null=True, blank=True)
     date_livraison_reelle = models.DateTimeField(null=True, blank=True)
     is_vente_directe = models.BooleanField(default=False)
-    # État
-    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='Validée par le client')
-    est_payee = models.BooleanField(default=False)
-    
-    # Financier
-    remise = models.DecimalField(max_digits=5, decimal_places=2, default=0)  # Remise globale en %
-    tva = models.ForeignKey(
-        'Taxe', 
-        on_delete=models.PROTECT, null=True, blank=True,
-        default=1, 
-        verbose_name="TVA applicable"
-    )
+    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='VALIDEE')
+    est_payee = models.BooleanField(default=True)
+    remise = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    total_commande = models.DecimalField(max_digits=10, decimal_places=2, default=0, blank=True)
     notes = models.TextField(blank=True)
-    total_commande = models.DecimalField(max_digits=10, decimal_places=2, default=0, blank=True)  # Total TTC
+
     class Meta:
         verbose_name = "Commande client"
         ordering = ['-date_creation']
 
     def __str__(self):
-        return f"Commande {self.numero_commande} - {self.client.nom_client}"
+        return f"Commande {self.numero_commande} - {self.client.nom_client if self.client else 'Vente directe'}"
 
     def save(self, *args, **kwargs):
-        """Sauvegarde la commande sans essayer de calculer le total immédiatement"""
         if not self.numero_commande:
             prefix = "CMD"
             last_id = CommandeClient.objects.order_by('-id').values_list('id', flat=True).first() or 0
             self.numero_commande = f"{prefix}-{str(last_id + 1).zfill(3)}"
-        
-        # Sauvegarde d'abord pour obtenir un ID
         super().save(*args, **kwargs)
-        
-        # Calcule le total seulement si la commande existe déjà
-        if self.pk:
-            self.total_commande = self.total_ttc
-            super().save(update_fields=['total_commande'])
 
-    @property
-    def total_ht(self):
-        if not self.pk:  # Si la commande n'est pas encore sauvegardée
-            return 0
-        return sum(ligne.sous_total_ht for ligne in self.lignes.all())
-
-    @property
-    def total_ttc(self):
-        if not self.pk or not hasattr(self, 'tva'):  # Si pas sauvegardé ou pas de TVA
-            return 0
-        return self.total_ht * (1 + self.tva.taux / 100)
+    def can_be_deleted(self):
+        return not (self.statut == 'VALIDEE' or self.est_payee)
     
+    def add_lignes(self, lignes_data):
+        """Méthode pour ajouter des lignes à la commande en évitant les doublons"""
+        produits_groupes = {}
+        
+        for line in lignes_data:
+            produit_id = line['produit'].id if hasattr(line['produit'], 'id') else line['produit']
+            
+            if produit_id in produits_groupes:
+                produits_groupes[produit_id]['quantite'] += Decimal(str(line['quantite']))
+            else:
+                produits_groupes[produit_id] = {
+                    'quantite': Decimal(str(line['quantite'])),
+                    'prix_unitaire': Decimal(str(line['prix_unitaire'])),
+                    'remise_ligne': Decimal(str(line.get('remise_ligne', 0)))
+                }
+
+        for produit_id, values in produits_groupes.items():
+            LigneCommandeClient.objects.create(
+                commande=self,
+                produit_id=produit_id,
+                quantite=values['quantite'],
+                prix_unitaire=values['prix_unitaire'],
+                remise_ligne=values['remise_ligne']
+            )
+        
+        self.calculer_total()
+
+    def calculer_total(self):
+        """Calcule et met à jour le total de la commande"""
+        total = Decimal('0')
+        for ligne in self.lignes.all():
+            total += (ligne.quantite * ligne.prix_unitaire) * (1 - ligne.remise_ligne / 100)
+        
+        # Application de la TVA
+        tva_rate = self.tva.taux / 100 if self.tva else Decimal('0.20')
+        self.total_commande = total * (1 + tva_rate)
+        self.save(update_fields=['total_commande'])
+
 
 class LigneCommandeClient(models.Model):
     commande = models.ForeignKey(CommandeClient, on_delete=models.CASCADE, related_name='lignes')
     produit = models.ForeignKey('Produit', on_delete=models.SET_NULL, null=True)
     quantite = models.IntegerField(validators=[MinValueValidator(1)])
-    prix_unitaire = models.DecimalField(max_digits=10, decimal_places=2)  # Prix au moment de la commande
-    remise_ligne = models.DecimalField(max_digits=5, decimal_places=2, default=0)  # Remise en % par produit
+    prix_unitaire = models.DecimalField(max_digits=10, decimal_places=2)
+    remise_ligne = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 
     def __str__(self):
         produit_designation = self.produit.designation if self.produit else "Produit supprimé"
         return f"{self.quantite}x {produit_designation}"
-
-
-    @property
-    def sous_total_ht(self):
-        try:
-            quantite = self.quantite if self.quantite is not None else 0
-            prix = self.prix_unitaire if self.prix_unitaire is not None else 0
-            remise = self.remise_ligne if self.remise_ligne is not None else 0
-            return (quantite * prix) * (1 - remise / 100)
-        except (TypeError, AttributeError):
-            return 0
-        
-    user = Utilisateur(username="brou")
+    
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['commande', 'produit'],
+                name='unique_produit_par_commande'
+            )
+        ]

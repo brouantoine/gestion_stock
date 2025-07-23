@@ -261,6 +261,18 @@ from rest_framework.decorators import action
 from django.core.exceptions import ValidationError
 from rest_framework.exceptions import APIException
 
+from decimal import Decimal
+from rest_framework import viewsets, status
+from rest_framework.response import Response
+from rest_framework.decorators import action
+from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.permissions import IsAuthenticated
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from django.db import transaction
+from .models import CommandeClient, Produit, LigneCommandeClient
+from .serializers import CommandeClientSerializer
+
+
 class CommandeClientViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
@@ -270,13 +282,10 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = request.data.copy()
+        data['utilisateur'] = request.user.id
 
-        if request.user.is_authenticated:
-            data['utilisateur'] = request.user.id
-            
         is_vente_directe = data.get('is_vente_directe', False)
-        
-        # Configuration automatique pour les ventes directes
+
         if is_vente_directe:
             data.update({
                 'statut': 'VALIDEE',
@@ -286,76 +295,106 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
-        
-        # Phase 1: Vérification préalable
-        lignes_data = data.get('lignes', [])
-        produits_a_mettre_a_jour = []
-        
-        for line in lignes_data:
-            try:
-                produit = Produit.objects.select_for_update().get(id=line['produit'])
+
+        # Vérification du stock pour les ventes directes
+        if is_vente_directe:
+            lignes_data = data.get('lignes', [])
+            produits_a_verifier = {}
+            
+            for line in lignes_data:
+                produit_id = line['produit']
                 quantite = int(line['quantite'])
                 
                 if quantite <= 0:
-                    raise ValidationError(f"Quantité invalide pour le produit {produit.designation}")
+                    raise ValidationError(f"Quantité invalide pour le produit ID {produit_id}")
                 
-                if is_vente_directe:
-                    nouveau_stock = produit.quantite_stock - quantite
-                    if nouveau_stock < 0:
-                        raise ValidationError(
-                            f"Stock insuffisant pour {produit.designation}. "
-                            f"Stock actuel: {produit.quantite_stock}, "
-                            f"Quantité demandée: {quantite}"
-                        )
-                    produits_a_mettre_a_jour.append((produit, quantite))
-                    
-            except Produit.DoesNotExist:
-                raise APIException(f"Produit ID {line['produit']} introuvable")
-            except KeyError as e:
-                raise APIException(f"Champ manquant dans la ligne: {str(e)}")
+                if produit_id in produits_a_verifier:
+                    produits_a_verifier[produit_id] += quantite
+                else:
+                    produits_a_verifier[produit_id] = quantite
+
+            # Vérification du stock en une seule requête par produit
+            for produit_id, quantite_totale in produits_a_verifier.items():
+                produit = Produit.objects.select_for_update().get(id=produit_id)
+                if produit.quantite_stock < quantite_totale:
+                    raise ValidationError(
+                        f"Stock insuffisant pour {produit.designation}. "
+                        f"Stock actuel: {produit.quantite_stock}, "
+                        f"Quantité demandée: {quantite_totale}"
+                    )
 
         try:
-            # Phase 2: Création de la commande
-            commande = serializer.save(utilisateur=request.user)
-
+            commande = serializer.save()
             
-            # Création des lignes de commande
+            # Mise à jour du stock pour les ventes directes
+            if is_vente_directe:
+                for produit_id, quantite_totale in produits_a_verifier.items():
+                    produit = Produit.objects.get(id=produit_id)
+                    produit.quantite_stock -= quantite_totale
+                    produit.save(update_fields=['quantite_stock'])
+
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            raise APIException(f"Erreur lors de la création de la commande: {str(e)}")
+
+        try:
+            commande = serializer.save(utilisateur=request.user)
+            print(f"Commande créée - ID: {commande.id}")
+
+            total_ht = Decimal("0.00")
+
             for line in lignes_data:
-                LigneCommandeClient.objects.create(
+                prix_unitaire = Decimal(str(line['prix_unitaire']))
+                remise = Decimal(str(line.get('remise_ligne', 0)))
+                quantite = Decimal(str(line['quantite']))
+
+                sous_total = (prix_unitaire - remise) * quantite
+                total_ht += sous_total
+
+                print(f"🧮 [DEBUG] Sous-total HT pour ligne (1x ID:{line['produit']}) : {sous_total:.4f}")
+
+                ligne = LigneCommandeClient.objects.create(
                     commande=commande,
                     produit_id=line['produit'],
-                    quantite=line['quantite'],
-                    prix_unitaire=line['prix_unitaire'],
-                    remise_ligne=line.get('remise_ligne', 0)
+                    quantite=quantite,
+                    prix_unitaire=prix_unitaire,
+                    remise_ligne=remise
                 )
+                print(f"Ligne créée - ID: {ligne.id}, Produit: {line['produit']}, Qté: {quantite}")
 
-            # Phase 3: Mise à jour du stock
+            print(f"💰 [DEBUG] Total HT (sans TVA) : {total_ht:.4f}")
+
+            # Appliquer la TVA
+            tva_rate = Decimal("0.18")  # 18%
+            total_ttc = total_ht * (Decimal("1.00") + tva_rate)
+            total_ttc = total_ttc.quantize(Decimal('0.01'))  # arrondi à 2 décimales
+
+            print(f"💡 [DEBUG] Total TTC avec TVA (18.00%) : {total_ttc:.6f}")
+
+            commande.total_commande = total_ttc
+            commande.save(update_fields=["total_commande"])
+            print(f"✅ [DEBUG] Total commande sauvegardé : {commande.total_commande}")
+
             if is_vente_directe:
                 for produit, quantite in produits_a_mettre_a_jour:
                     produit.quantite_stock -= quantite
-                    
-                    # Vérification du seuil d'alerte
                     if produit.quantite_stock <= produit.seuil_alerte:
-                        # Ici vous pourriez déclencher une alerte
+                        # Alerte éventuelle ici
                         pass
-                    
                     produit.save(update_fields=['quantite_stock'])
-            
-            # Calcul du total
-            commande.refresh_from_db()
-            commande.total_commande = commande.total_ttc
-            commande.save(update_fields=['total_commande'])
-            
-            # Retourner la réponse
+                    print(f"Stock mis à jour - Produit: {produit.id}, Nouveau stock: {produit.quantite_stock}")
+
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-            
+
         except Exception as e:
+            print(f"Erreur lors de la création: {str(e)}")
             raise APIException(f"Erreur lors de la création de la commande: {str(e)}")
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        
+
         if not instance.can_be_deleted():
             return Response(
                 {
@@ -365,7 +404,7 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -383,10 +422,11 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
         commande = self.get_object()
         if commande.statut == 'ANNULEE':
             return Response({'status': 'already cancelled'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         commande.statut = 'ANNULEE'
         commande.save()
         return Response({'status': 'cancelled'}, status=status.HTTP_200_OK)
+
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -757,49 +797,88 @@ class RapportAPIView(APIView):
             )
             
         return handlers[report_type](start_date, end_date, request)
+    
+    
+    def _get_top_produits(self, start_date, end_date):
+        """Version finale avec protection contre les doublons"""
+        # 1. Récupération des IDs de commandes valides
+        commande_ids = CommandeClient.objects.filter(
+            date_creation__date__gte=start_date,
+            date_creation__date__lte=end_date,
+            statut='VALIDEE'
+        ).values_list('id', flat=True)
+
+        # 2. Agrégation des lignes
+        return (
+            LigneCommandeClient.objects
+            .filter(commande_id__in=commande_ids)
+            .values('produit__id', 'produit__designation')
+            .annotate(
+                quantite_vendue=Sum('quantite'),
+                total_ca=Sum(
+                    F('quantite') * F('prix_unitaire') * (1 - F('remise_ligne')/100),
+                    output_field=DecimalField(max_digits=12, decimal_places=2)
+                )
+            )
+            .order_by('-total_ca')[:10]
+        )
+
 
     def statistiques_commandes(self, start_date, end_date, request):
         """Génère les statistiques des commandes"""
         try:
-            # Paramètres de période (par défaut: 30 derniers jours)
-            days = int(request.GET.get('days', 30))
-            end_date = timezone.now().date()
-            start_date = end_date - timedelta(days=days)
+            # Paramètres de période
+            start_date = timezone.datetime.strptime(request.GET.get('debut'), '%Y-%m-%d').date()
+            end_date = timezone.datetime.strptime(request.GET.get('fin'), '%Y-%m-%d').date()
+            days = (end_date - start_date).days + 1  # Nombre de jours inclusifs
+
+            # Récupération des commandes valides dans la période
+            commandes = CommandeClient.objects.filter(
+                date_creation__date__gte=start_date,
+                date_creation__date__lte=end_date,
+            )
+
+            # Calcul des statistiques globales
+            total_ca = commandes.aggregate(total=Sum('total_commande'))['total'] or 0
+            total_ventes = commandes.count()
             
-            # Récupération des stats
-            stats_queryset = Statistique.objects.filter(
-                date__gte=start_date,
-                date__lte=end_date
-            ).order_by('date')
+            ventes_directes = commandes.filter(
+                Q(client__isnull=True) | Q(client__id=3)  # Client Direct ou null
+            ).count()
             
-            # Calculs manuels des totaux
-            total_data = {
-                'total_ca': sum(s.montant_total for s in stats_queryset),
-                'total_ventes': sum(s.nb_ventes for s in stats_queryset),
-                'ventes_directes': sum(s.nb_ventes_directes for s in stats_queryset),
-                'commandes_clients': sum(s.nb_commandes_clients for s in stats_queryset),
-                'ca_ventes_directes': sum(s.montant_ventes_directes for s in stats_queryset),
-                'ca_commandes': sum(s.montant_commandes for s in stats_queryset),
-                'avg_ventes': sum(s.nb_ventes for s in stats_queryset) / days if days > 0 else 0
-            }
+            commandes_clients = total_ventes - ventes_directes
             
-            # Détails quotidiens
-            daily_stats = [
-                {
-                    'date': s.date.strftime('%Y-%m-%d'),
-                    'ca_ht': float(s.montant_total),
-                    'ventes': s.nb_ventes,
-                    'ventes_directes': s.nb_ventes_directes,
-                    'commandes_clients': s.nb_commandes_clients
-                } for s in stats_queryset
-            ]
+            ca_ventes_directes = commandes.filter(
+                Q(client__isnull=True) | Q(client__id=3)
+            ).aggregate(total=Sum('total_commande'))['total'] or 0
             
-            # Commandes récentes
-            recent_commands = CommandeClient.objects.filter(
-                date_creation__gte=start_date,
-                statut='VALIDEE'
-            ).order_by('-date_creation')[:10]
-            
+            ca_commandes = total_ca - ca_ventes_directes
+            avg_ventes = total_ventes / days if days > 0 else 0
+
+            # Préparation des données quotidiennes
+            stats_quotidiennes = []
+            current_date = start_date
+            while current_date <= end_date:
+                daily_commandes = commandes.filter(date_creation__date=current_date)
+                daily_ca = daily_commandes.aggregate(total=Sum('total_commande'))['total'] or 0
+                daily_ventes = daily_commandes.count()
+                
+                stats_quotidiennes.append({
+                    'date': current_date.strftime('%Y-%m-%d'),
+                    'ca_ht': float(daily_ca),
+                    'ventes': daily_ventes,
+                    'ventes_directes': daily_commandes.filter(
+                        Q(client__isnull=True) | Q(client__id=3)
+                    ).count(),
+                    'commandes_clients': daily_ventes - daily_commandes.filter(
+                        Q(client__isnull=True) | Q(client__id=3)
+                    ).count()
+                })
+                current_date += timedelta(days=1)
+
+            # Commandes récentes (10 dernières)
+            recent_commands = commandes.order_by('-date_creation')[:10]
+
             return Response({
                 'success': True,
                 'data': {
@@ -807,18 +886,27 @@ class RapportAPIView(APIView):
                         'debut': start_date.strftime('%Y-%m-%d'),
                         'fin': end_date.strftime('%Y-%m-%d')
                     },
-                    'stats_globales': total_data,
-                    'stats_quotidiennes': daily_stats,
+                    'stats_globales': {
+                        'total_ca': float(total_ca),
+                        'total_ventes': total_ventes,
+                        'ventes_directes': ventes_directes,
+                        'commandes_clients': commandes_clients,
+                        'ca_ventes_directes': float(ca_ventes_directes),
+                        'ca_commandes': float(ca_commandes),
+                        'avg_ventes': float(avg_ventes)
+                    },
+                    'stats_quotidiennes': stats_quotidiennes,
                     'commandes_recentes': [
                         {
                             'id': cmd.id,
                             'numero': cmd.numero_commande,
-                            'client': cmd.client.nom_client if cmd.client else 'Direct',
+                            'client': cmd.client.nom_client if cmd.client else 'Client Direct',
                             'total': float(cmd.total_commande) if cmd.total_commande else 0,
                             'date': cmd.date_creation.strftime('%Y-%m-%d %H:%M'),
-                            'is_vente_directe': cmd.client is None or str(cmd.client.id) == '3'
+                            'is_vente_directe': cmd.client is None or cmd.client.id == 3
                         } for cmd in recent_commands
-                    ]
+                    ],
+                    'top_produits': self._get_top_produits(start_date, end_date)
                 }
             })
 
@@ -830,59 +918,75 @@ class RapportAPIView(APIView):
                 'message': 'Erreur lors du calcul des statistiques'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
     def _get_rapport_ventes(self, start_date, end_date, request):
-        """Version corrigée pour afficher toutes les commandes"""
+        """Génère le rapport des ventes avec statistiques complètes"""
         try:
-            # Si aucune date n'est spécifiée, on prend les 30 derniers jours
+            # Gestion des dates par défaut (30 derniers jours si non spécifiées)
             if not start_date or not end_date:
-                days = 30
                 end_date = timezone.now().date()
-                start_date = end_date - timedelta(days=days)
+                start_date = end_date - timedelta(days=30)
             
-            # Récupération des stats
-            stats_queryset = Statistique.objects.filter(
-                date__gte=start_date,
-                date__lte=end_date
-            ).order_by('date')
-            
-            # Calculs des totaux
-            total_data = {
-                'total_ca': sum(s.montant_total for s in stats_queryset),
-                'total_ventes': sum(s.nb_ventes for s in stats_queryset),
-                'ventes_directes': sum(s.nb_ventes_directes for s in stats_queryset),
-                'commandes_clients': sum(s.nb_commandes_clients for s in stats_queryset),
-                'ca_ventes_directes': sum(s.montant_ventes_directes for s in stats_queryset),
-                'ca_commandes': sum(s.montant_commandes for s in stats_queryset),
-                'avg_ventes': sum(s.nb_ventes for s in stats_queryset) / (end_date - start_date).days if start_date != end_date else 0
-            }
-            
-            # Détails quotidiens
-            daily_stats = [
-                {
-                    'date': s.date.strftime('%Y-%m-%d'),
-                    'ca_ht': float(s.montant_total),
-                    'ventes': s.nb_ventes,
-                    'ventes_directes': s.nb_ventes_directes,
-                    'commandes_clients': s.nb_commandes_clients
-                } for s in stats_queryset
-            ]
-            
-            # Commandes récentes - FILTRE CORRIGÉ ICI
-            recent_commands = CommandeClient.objects.filter(
+            # Conversion des dates si nécessaire
+            if isinstance(start_date, str):
+                start_date = timezone.datetime.strptime(start_date, '%Y-%m-%d').date()
+            if isinstance(end_date, str):
+                end_date = timezone.datetime.strptime(end_date, '%Y-%m-%d').date()
+
+            # Calcul de la période en jours
+            days = (end_date - start_date).days + 1
+
+            # Requête de base pour les commandes validées
+            commandes = CommandeClient.objects.filter(
                 date_creation__date__gte=start_date,
-                date_creation__date__lte=end_date
-            ).order_by('-date_creation')[:10]
-            
-            # Top produits
-            top_produits = LigneCommandeClient.objects.filter(
-                commande__date_creation__date__gte=start_date,
-                commande__date_creation__date__lte=end_date
-            ).values(
-                'produit__id', 'produit__designation'
-            ).annotate(
-                quantite_vendue=Sum('quantite'),
-                total_ca=Sum(F('quantite') * F('prix_unitaire'))
-            ).order_by('-total_ca')[:10]
+                date_creation__date__lte=end_date,
+                statut='VALIDEE'
+            )
+
+            # Statistiques globales (en une seule requête)
+            stats_globales = commandes.aggregate(
+                total_ca=Sum('total_commande'),
+                total_ventes=Count('id'),
+                ventes_directes=Count('id', filter=Q(client__isnull=True) | Q(client__id=3)),
+                ca_ventes_directes=Sum('total_commande', filter=Q(client__isnull=True) | Q(client__id=3))
+            )
+
+            # Calcul des dérivés
+            total_ca = stats_globales['total_ca'] or 0
+            ca_ventes_directes = stats_globales['ca_ventes_directes'] or 0
+            total_ventes = stats_globales['total_ventes'] or 0
+            ventes_directes = stats_globales['ventes_directes'] or 0
+
+            # Statistiques quotidiennes
+            stats_quotidiennes = []
+            current_date = start_date
+            while current_date <= end_date:
+                daily_stats = commandes.filter(date_creation__date=current_date).aggregate(
+                    ca_ht=Sum('total_commande'),
+                    ventes=Count('id'),
+                    ventes_directes=Count('id', filter=Q(client__isnull=True) | Q(client__id=3))
+                )
+                
+                stats_quotidiennes.append({
+                    'date': current_date.strftime('%Y-%m-%d'),
+                    'ca_ht': float(daily_stats['ca_ht'] or 0),
+                    'ventes': daily_stats['ventes'] or 0,
+                    'ventes_directes': daily_stats['ventes_directes'] or 0,
+                    'commandes_clients': (daily_stats['ventes'] or 0) - (daily_stats['ventes_directes'] or 0)
+                })
+                current_date += timedelta(days=1)
+
+            top_produits = self._get_top_produits(start_date, end_date)
+
+            # Commandes récentes (10 dernières)
+            recent_commands = commandes.order_by('-date_creation')[:10].values(
+                'id',
+                'numero_commande',
+                'client__nom_client',
+                'total_commande',
+                'date_creation',
+                'is_vente_directe'
+            )
 
             return Response({
                 "success": True,
@@ -891,28 +995,36 @@ class RapportAPIView(APIView):
                         "debut": start_date.strftime('%Y-%m-%d'),
                         "fin": end_date.strftime('%Y-%m-%d')
                     },
-                    "stats_globales": total_data,
-                    "stats_quotidiennes": daily_stats,
+                    "stats_globales": {
+                        "total_ca": float(total_ca),
+                        "total_ventes": total_ventes,
+                        "ventes_directes": ventes_directes,
+                        "commandes_clients": total_ventes - ventes_directes,
+                        "ca_ventes_directes": float(ca_ventes_directes),
+                        "ca_commandes": float(total_ca - ca_ventes_directes),
+                        "avg_ventes": total_ventes / days if days > 0 else 0
+                    },
+                    "stats_quotidiennes": stats_quotidiennes,
                     "top_produits": list(top_produits),
                     "commandes_recentes": [
                         {
-                            'id': cmd.id,
-                            'numero': cmd.numero_commande,
-                            'client': cmd.client.nom_client if cmd.client else 'Client Direct',
-                            'total': float(cmd.total_commande) if cmd.total_commande else 0,
-                            'date': cmd.date_creation.strftime('%Y-%m-%d %H:%M'),
-                            'is_vente_directe': cmd.client is None or str(getattr(cmd.client, 'id', '')) == '3'
+                            'id': cmd['id'],
+                            'numero': cmd['numero_commande'],
+                            'client': cmd['client__nom_client'] or 'Client Direct',
+                            'total': float(cmd['total_commande']) if cmd['total_commande'] else 0,
+                            'date': cmd['date_creation'].strftime('%Y-%m-%d %H:%M'),
+                            'is_vente_directe': cmd['is_vente_directe']
                         } for cmd in recent_commands
                     ]
                 }
             })
-            
+
         except Exception as e:
             logger.error(f"Erreur rapport ventes: {str(e)}", exc_info=True)
             return Response({
                 "success": False,
                 "error": str(e),
-                "message": "Erreur lors du calcul des statistiques"
+                "message": "Erreur lors de la génération du rapport des ventes"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def _get_rapport_produits(self, start_date, end_date, request):
@@ -926,19 +1038,17 @@ class RapportAPIView(APIView):
             # Top produits
             top_produits = self._get_top_produits(start_date, end_date)
             
-            # Mouvements de stock
-            mouvements = MouvementStock.objects.filter(
-                date_mouvement__date__range=[start_date, end_date] if start_date and end_date else Q()
-            ).values('type_mouvement').annotate(
-                total=Sum('quantite')
-            )
+            # Mouvements de stock (entrées/sorties)
+
+            # Nombre total de produits
+            total_produits = Produit.objects.count()
             
             return Response({
                 "success": True,
                 "data": {
+                    "total_produits": total_produits,
                     "produits_rupture": list(produits_rupture),
                     "top_produits": list(top_produits),
-                    "mouvements_stock": list(mouvements),
                     "periode": {
                         "debut": start_date.strftime('%Y-%m-%d') if start_date else None,
                         "fin": end_date.strftime('%Y-%m-%d') if end_date else None
@@ -956,31 +1066,57 @@ class RapportAPIView(APIView):
     def _get_rapport_clients(self, start_date, end_date, request):
         """Génère le rapport clients"""
         try:
-            # Clients actifs
+            # Vérification des dates
+            if not start_date or not end_date:
+                raise ValueError("Les dates de début et fin sont requises")
+
+            # Conversion des dates en datetime si nécessaire
+            if isinstance(start_date, str):
+                start_date = timezone.datetime.strptime(start_date, '%Y-%m-%d').date()
+            if isinstance(end_date, str):
+                end_date = timezone.datetime.strptime(end_date, '%Y-%m-%d').date()
+
+            # Clients actifs (ayant au moins une commande validée dans la période)
             clients_actifs = Client.objects.filter(
-                commandes__date_creation__range=[start_date, end_date] if start_date and end_date else Q()
+                commandes__date_creation__date__gte=start_date,
+                commandes__date_creation__date__lte=end_date,
+                commandes__statut='VALIDEE'
             ).annotate(
-                total_commandes=Count('commandes'),
-                total_ca=Sum('commandes__total_commande')
+                total_commandes=Count('commandes', filter=Q(
+                    commandes__date_creation__date__gte=start_date,
+                    commandes__date_creation__date__lte=end_date,
+                    commandes__statut='VALIDEE'
+                )),
+                total_ca=Sum('commandes__total_commande', filter=Q(
+                    commandes__date_creation__date__gte=start_date,
+                    commandes__date_creation__date__lte=end_date,
+                    commandes__statut='VALIDEE'
+                ))
+            ).exclude(
+                is_direct=True  # Exclure les clients directs si nécessaire
             ).order_by('-total_ca').values(
                 'id', 'nom_client', 'email', 'total_commandes', 'total_ca'
             )[:10]
-            
-            # Répartition géographique
-            repartition_geo = Client.objects.values(
+
+            # Répartition géographique (tous clients ayant commandé dans la période)
+            repartition_geo = Client.objects.filter(
+                commandes__date_creation__date__gte=start_date,
+                commandes__date_creation__date__lte=end_date,
+                commandes__statut='VALIDEE'
+            ).values(
                 'ville', 'pays'
             ).annotate(
-                count=Count('id')
+                count=Count('id', distinct=True)
             ).order_by('-count')
-            
+
             return Response({
                 "success": True,
                 "data": {
                     "clients_actifs": list(clients_actifs),
                     "repartition_geo": list(repartition_geo),
                     "periode": {
-                        "debut": start_date.strftime('%Y-%m-%d') if start_date else None,
-                        "fin": end_date.strftime('%Y-%m-%d') if end_date else None
+                        "debut": start_date.strftime('%Y-%m-%d'),
+                        "fin": end_date.strftime('%Y-%m-%d')
                     }
                 }
             })
@@ -988,7 +1124,11 @@ class RapportAPIView(APIView):
         except Exception as e:
             logger.error(f"Erreur rapport clients: {str(e)}", exc_info=True)
             return Response(
-                {"error": str(e)},
+                {
+                    "success": False,
+                    "error": str(e),
+                    "message": "Erreur lors de la génération du rapport clients"
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -1019,21 +1159,6 @@ class RapportAPIView(APIView):
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
-    def _get_top_produits(self, start_date, end_date, limit=5):
-        """Helper pour récupérer les produits les plus vendus"""
-        queryset = LigneCommandeClient.objects.filter(
-            commande__statut='VALIDEE',
-            commande__date_creation__range=[start_date, end_date] if start_date and end_date else Q()
-        )
-        
-        return queryset.values(
-            'produit__id', 'produit__designation'
-        ).annotate(
-            total_ventes=Sum('quantite'),
-            total_ca=Sum(F('quantite') * F('prix_unitaire'), output_field=FloatField())
-        ).order_by('-total_ca')[:limit]
-    
     
 
     def _get_rapport_utilisateurs(self, start_date, end_date, request):

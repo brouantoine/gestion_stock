@@ -262,3 +262,25 @@ LOGGING = {
         'level': 'DEBUG',
     },
 }
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+        'file': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': 'debug_requetes.log',
+        },
+    },
+    'loggers': {
+        'api': {  # Remplacez 'api' par le nom de votre application
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+        },
+    },
+}

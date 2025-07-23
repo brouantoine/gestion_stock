@@ -22,3 +22,14 @@ from .models import Utilisateur
 def assign_user_modules(sender, instance, created, **kwargs):
     if created:
         instance.assign_default_modules()
+
+
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+from api.models import LigneCommandeClient, CommandeClient
+
+@receiver([post_save, post_delete], sender=LigneCommandeClient)
+def update_total_commande(sender, instance, **kwargs):
+    commande = instance.commande
+    if commande:
+        commande.calculer_total_commande()

@@ -14,3 +14,13 @@ class YourAppConfig(AppConfig):
     
     def ready(self):
         import api.signals
+
+
+
+from django.apps import AppConfig
+
+class ApiConfig(AppConfig):
+    name = 'api'
+
+    def ready(self):
+        import api.signals  # 👈 charge les signaux automatiquement
