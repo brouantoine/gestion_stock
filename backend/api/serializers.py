@@ -38,22 +38,18 @@ class FournisseurSerializer(serializers.ModelSerializer):
     class Meta:
         model = Fournisseur
         fields = '__all__'
-        extra_kwargs = {
-            'siret': {'required': False}
-        }
 
 class ClientSerializer(serializers.ModelSerializer):
     class Meta:
         model = Client
         fields = [
             'id', 'nom_client', 'adresse', 'code_postal', 'ville',
-            'pays', 'telephone', 'email', 'siret', 'date_creation', 'notes'
+            'pays', 'telephone', 'email', 'date_creation', 'notes'
         ]
         read_only_fields = ['id', 'date_creation']
         extra_kwargs = {
             'telephone': {'required': True},
             'email': {'required': False},
-            'siret': {'required': False, 'min_length': 14, 'max_length': 14}
         }
 
     def validate_telephone(self, value):
@@ -66,7 +62,7 @@ from decimal import Decimal
 from .models import CommandeClient, LigneCommandeClient, Produit, Taxe
 
 class LigneCommandeClientSerializer(serializers.ModelSerializer):
-    produit = ProduitSerializer(read_only=True)  
+    produit = ProduitSerializer(read_only=True) 
     produit_id = serializers.PrimaryKeyRelatedField(
         queryset=Produit.objects.all(),
         source='produit',
@@ -78,7 +74,7 @@ class LigneCommandeClientSerializer(serializers.ModelSerializer):
         model = LigneCommandeClient
         fields = [
             'id', 'produit', 'produit_id', 'quantite', 'prix_unitaire',
-            'remise_ligne', 'total_ligne_ht'
+            'remise_ligne', 'total_ligne_ht',
         ]
         read_only_fields = ['id', 'total_ligne_ht']
 
@@ -95,6 +91,17 @@ class LigneCommandeClientSerializer(serializers.ModelSerializer):
 
 class CommandeClientSerializer(serializers.ModelSerializer):
     lignes = LigneCommandeClientSerializer(many=True)
+    
+    # Affichage du client (lecture seule)
+    client = ClientSerializer(read_only=True)
+    
+    # Envoi du client (écriture seule)
+    client_id = serializers.PrimaryKeyRelatedField(
+        queryset=Client.objects.all(),
+        write_only=True,
+        source='client'
+    )
+
     tva = serializers.PrimaryKeyRelatedField(
         queryset=Taxe.objects.all(),
         required=True,
@@ -107,19 +114,18 @@ class CommandeClientSerializer(serializers.ModelSerializer):
     class Meta:
         model = CommandeClient
         fields = [
-            'id', 'client', 'tva', 'date_creation', 'statut',
-            'is_vente_directe', 'notes', 'lignes', 'total_commande', 'utilisateur', 'numero_commande'
+            'id', 'client', 'client_id', 'tva', 'date_creation', 'statut',
+            'is_vente_directe', 'notes', 'lignes', 'total_commande',
+            'utilisateur', 'numero_commande'
         ]
-        read_only_fields = ['id', 'date_creation', 'total_commande', 'utilisateur']
+        read_only_fields = ['id', 'date_creation', 'total_commande', 'utilisateur', 'client']
 
     def validate(self, data):
-        # Validation client pour les commandes non-directes
         if not data.get('is_vente_directe') and not data.get('client'):
             raise serializers.ValidationError(
                 "Un client est requis pour les commandes non-directes"
             )
-        
-        # Validation des doublons dans les lignes
+
         if 'lignes' in data:
             produits = [line['produit'].id for line in data['lignes']]
             if len(produits) != len(set(produits)):
@@ -131,13 +137,14 @@ class CommandeClientSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         lignes_data = validated_data.pop('lignes', [])
-        commande = CommandeClient.objects.create(**validated_data)
+        utilisateur = self.context['request'].user
+
+        commande = CommandeClient.objects.create(utilisateur=utilisateur, **validated_data)
         commande.add_lignes(lignes_data)
         return commande
 
     def update(self, instance, validated_data):
         lignes_data = validated_data.pop('lignes', None)
-        
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -147,6 +154,7 @@ class CommandeClientSerializer(serializers.ModelSerializer):
             instance.add_lignes(lignes_data)
 
         return instance
+
     
 class PermissionSerializer(serializers.ModelSerializer):
     class Meta:

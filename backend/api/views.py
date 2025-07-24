@@ -94,22 +94,43 @@ class ClientViewSet(viewsets.ModelViewSet):
     queryset = Client.objects.all().order_by('-date_creation')
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     
-    filterset_fields = ['ville', 'pays', 'is_direct']  # Ajoutez 'is_direct' ici
-    search_fields = ['nom_client', 'email', 'telephone', 'siret']
+    filterset_fields = ['ville', 'pays', 'is_direct']
+    search_fields = ['nom_client', 'email', 'telephone']
     ordering_fields = ['nom_client', 'date_creation']
     ordering = ['-date_creation']
 
     def perform_create(self, serializer):
-        serializer.save()
+        try:
+            serializer.save()
+        except Exception as e:
+            raise ValidationError({'error': f"Erreur lors de la création du client: {str(e)}"})
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        # Filtre supplémentaire pour is_direct
         is_direct = self.request.query_params.get('is_direct')
         if is_direct in ['true', 'false']:
             queryset = queryset.filter(is_direct=is_direct.lower() == 'true')
         return queryset
-        
+
+    def retrieve(self, request, *args, **kwargs):
+        try:
+            return super().retrieve(request, *args, **kwargs)
+        except Client.DoesNotExist:
+            return Response({'error': 'Client introuvable'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def update(self, request, *args, **kwargs):
+        try:
+            return super().update(request, *args, **kwargs)
+        except Exception as e:
+            return Response({'error': f"Erreur lors de la mise à jour: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except Exception as e:
+            return Response({'error': f"Erreur lors de la suppression: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated

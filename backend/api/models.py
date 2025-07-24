@@ -82,7 +82,6 @@ class Client(models.Model):
     pays = models.CharField(max_length=100, default="France")  # Pays par défaut
     telephone = models.CharField(max_length=20)  # Téléphone principal
     email = models.EmailField()  # Email de contact
-    siret = models.CharField(max_length=14, blank=True, null=True)  # SIRET si pro
     date_creation = models.DateTimeField(auto_now_add=True)  # Date de création fiche
     notes = models.TextField(blank=True, null=True)  # Infos supplémentaires
     is_direct = models.BooleanField(default=False)  # Vente sans client enregistré
