@@ -302,7 +302,7 @@ class CommandeClientViewSet(viewsets.ModelViewSet):
             produits_a_verifier = {}
             
             for line in lignes_data:
-                produit_id = line['produit']
+                produit_id = line['produit_id']
                 quantite = int(line['quantite'])
                 
                 if quantite <= 0:
@@ -842,17 +842,17 @@ class RapportAPIView(APIView):
             total_ca = commandes.aggregate(total=Sum('total_commande'))['total'] or 0
             total_ventes = commandes.count()
             
-            ventes_directes = commandes.filter(
-                Q(client__isnull=True) | Q(client__id=3)  # Client Direct ou null
-            ).count()
-            
-            commandes_clients = total_ventes - ventes_directes
+            ventes_directes = commandes.filter(is_vente_directe=True).count()
+            commandes_clients = commandes.filter(is_vente_directe=False).count()
             
             ca_ventes_directes = commandes.filter(
-                Q(client__isnull=True) | Q(client__id=3)
+                is_vente_directe=True
             ).aggregate(total=Sum('total_commande'))['total'] or 0
             
-            ca_commandes = total_ca - ca_ventes_directes
+            ca_commandes = commandes.filter(
+                is_vente_directe=False
+            ).aggregate(total=Sum('total_commande'))['total'] or 0
+            
             avg_ventes = total_ventes / days if days > 0 else 0
 
             # Préparation des données quotidiennes
@@ -867,12 +867,8 @@ class RapportAPIView(APIView):
                     'date': current_date.strftime('%Y-%m-%d'),
                     'ca_ht': float(daily_ca),
                     'ventes': daily_ventes,
-                    'ventes_directes': daily_commandes.filter(
-                        Q(client__isnull=True) | Q(client__id=3)
-                    ).count(),
-                    'commandes_clients': daily_ventes - daily_commandes.filter(
-                        Q(client__isnull=True) | Q(client__id=3)
-                    ).count()
+                    'ventes_directes': daily_commandes.filter(is_vente_directe=True).count(),
+                    'commandes_clients': daily_commandes.filter(is_vente_directe=False).count()
                 })
                 current_date += timedelta(days=1)
 
@@ -903,7 +899,7 @@ class RapportAPIView(APIView):
                             'client': cmd.client.nom_client if cmd.client else 'Client Direct',
                             'total': float(cmd.total_commande) if cmd.total_commande else 0,
                             'date': cmd.date_creation.strftime('%Y-%m-%d %H:%M'),
-                            'is_vente_directe': cmd.client is None or cmd.client.id == 3
+                            'is_vente_directe': cmd.is_vente_directe
                         } for cmd in recent_commands
                     ],
                     'top_produits': self._get_top_produits(start_date, end_date)
@@ -947,8 +943,8 @@ class RapportAPIView(APIView):
             stats_globales = commandes.aggregate(
                 total_ca=Sum('total_commande'),
                 total_ventes=Count('id'),
-                ventes_directes=Count('id', filter=Q(client__isnull=True) | Q(client__id=3)),
-                ca_ventes_directes=Sum('total_commande', filter=Q(client__isnull=True) | Q(client__id=3))
+                ventes_directes=Count('id', filter=Q(is_vente_directe=True)),
+                ca_ventes_directes=Sum('total_commande', filter=Q(is_vente_directe=True))
             )
 
             # Calcul des dérivés
@@ -964,7 +960,7 @@ class RapportAPIView(APIView):
                 daily_stats = commandes.filter(date_creation__date=current_date).aggregate(
                     ca_ht=Sum('total_commande'),
                     ventes=Count('id'),
-                    ventes_directes=Count('id', filter=Q(client__isnull=True) | Q(client__id=3))
+                    ventes_directes=Count('id', filter=Q(is_vente_directe=True))
                 )
                 
                 stats_quotidiennes.append({

@@ -66,16 +66,22 @@ from decimal import Decimal
 from .models import CommandeClient, LigneCommandeClient, Produit, Taxe
 
 class LigneCommandeClientSerializer(serializers.ModelSerializer):
-    produit = serializers.PrimaryKeyRelatedField(queryset=Produit.objects.all())
+    produit = ProduitSerializer(read_only=True)  
+    produit_id = serializers.PrimaryKeyRelatedField(
+        queryset=Produit.objects.all(),
+        source='produit',
+        write_only=True
+    ) 
     total_ligne_ht = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = LigneCommandeClient
         fields = [
-            'id', 'produit', 'quantite', 'prix_unitaire', 
+            'id', 'produit', 'produit_id', 'quantite', 'prix_unitaire',
             'remise_ligne', 'total_ligne_ht'
         ]
         read_only_fields = ['id', 'total_ligne_ht']
+
         extra_kwargs = {
             'quantite': {'min_value': 1, 'required': True},
             'prix_unitaire': {'min_value': 0, 'required': True}
@@ -102,7 +108,7 @@ class CommandeClientSerializer(serializers.ModelSerializer):
         model = CommandeClient
         fields = [
             'id', 'client', 'tva', 'date_creation', 'statut',
-            'is_vente_directe', 'notes', 'lignes', 'total_commande', 'utilisateur'
+            'is_vente_directe', 'notes', 'lignes', 'total_commande', 'utilisateur', 'numero_commande'
         ]
         read_only_fields = ['id', 'date_creation', 'total_commande', 'utilisateur']
 
@@ -290,5 +296,5 @@ class RapportCommandeSerializer(serializers.ModelSerializer):
     class Meta:
         model = CommandeClient
         fields = [
-            'id', 'numero_commande', 'client', 'total_commande', 'statut', 'date_creation'
+            'id', 'numero_commande', 'client', 'total_commande', 'statut', 'date_creation', 'is_vente_directe'
         ]

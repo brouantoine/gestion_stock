@@ -1,0 +1,12 @@
+Erreur statistiques_commandes: 'RapportAPIView' object has no attribute '_get_top_produits'
+Traceback (most recent call last):
+  File "C:\Users\DELL 7410\Desktop\Mes Projets\gestion_stock\backend\api\views.py", line 892, in statistiques_commandes
+    'top_produits': self._get_top_produits(start_date, end_date)
+                    ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'RapportAPIView' object has no attribute '_get_top_produits'. Did you mean: '_get_rapport_produits'?
+Erreur statistiques_commandes: 'RapportAPIView' object has no attribute '_get_top_produits'
+Traceback (most recent call last):
+  File "C:\Users\DELL 7410\Desktop\Mes Projets\gestion_stock\backend\api\views.py", line 892, in statistiques_commandes
+    'top_produits': self._get_top_produits(start_date, end_date)
+                    ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'RapportAPIView' object has no attribute '_get_top_produits'. Did you mean: '_get_rapport_produits'?
